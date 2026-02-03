@@ -1,6 +1,7 @@
 import os, json
 import torch
 from torch.utils.data import Dataset, DataLoader
+import pandas as pd
 
 class CSIDataset(Dataset):
     """
@@ -9,7 +10,7 @@ class CSIDataset(Dataset):
     def __init__(self, 
                  root="../data/",
                  task="BreathingDetection",
-                 split="train",
+                 split="train_id",
                  transform=None,
                  file_format="h5",
                  data_column="file_path",
@@ -42,7 +43,20 @@ class CSIDataset(Dataset):
                 print(f"Successfully found task directory: {task_dir}")
             else:
                 print(f"Could not find task directory: {task_dir}")
+
+        # define split and metadata paths
+        self.split_path = os.path.join(self.task_dir, "splits", f"{split}.json")
+        print(f"Using split: {split}")
+
+        self.metadata_dir = os.path.join(self.task_dir, "metadata")
+        self.metadata_path = os.path.join(self.metadata_dir, "sample_metadata.csv")
+        self.label_mapper = os.path.join(self.metadata_dir, "label_mapping.json")
+
+        with open(self.split_path, "r") as f:
+            self.split_ids = set(json.load(f))
+
+        self.metadata = pd.read_csv(self.metadata_path)
         
-        
+
 
         
