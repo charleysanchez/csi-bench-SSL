@@ -2,6 +2,7 @@ import os
 from torch.utils.data import DataLoader
 from dataset import CSIDataset
 import torch
+import json
 
 def get_loaders(
         root="../data/",
@@ -81,6 +82,9 @@ def get_loaders(
     metadata_path = os.path.join(metadata_dir, "metadata.csv")
     map_path = os.path.join(metadata_dir, "label_mapping.json")
 
+    with open(map_path, "r") as f:
+        label_mapper = json.load(f)
+
     datasets = {}
     for split_name in all_splits:
         try:
@@ -143,4 +147,90 @@ def get_loaders(
         )
 
         # test loaders
+        for test_split in test_splits:
+            # special case for backward compatibility
+            if test_split == "test_id":
+                loader_name = "test"
+            else:
+                loader_name = f"test_{test_split}" if not test_split.startswith('test_') else test_split
+            
+            test_sampler = torch.utils.data.DistributedSampler(
+                dataset=datasets[test_split],
+                shuffle=False
+            )
+
+            loaders[loader_name] = DataLoader(
+                dataset=datasets[test_split],
+                batch_size=batch_size,
+                sampler=test_sampler,
+                num_workers=num_workers,
+                pin_memory=pin_memory,
+                collate_fn=collate_fn
+            )
+    else:
+        # regular non distributed data loaders
+        loaders['train'] = DataLoader(
+            dataset=datasets[train_split],
+            batch_size=batch_size,
+            shuffle=shuffle_train,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            collate_fn=collate_fn
+        )
+
+        loaders['val'] = DataLoader(
+            dataset=datasets[val_split],
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            collate_fn=collate_fn
+        )
+
+        for test_split in test_splits:
+            # special case for backward compatibility
+            if test_split == "test_id":
+                loader_name = "test"
+            else:
+                loader_name = f"test_{test_split}" if not test_split.startswith('test_') else test_split
+            
+
+            loaders[loader_name] = DataLoader(
+                dataset=datasets[test_split],
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                pin_memory=pin_memory,
+                collate_fn=collate_fn
+            )
+
+        num_classes = label_mapper["num_classes"]
+
+        # Return dictionary with additional distributed information if needed
+        result = {
+            'loaders': loaders,
+            'datasets': datasets,
+            'num_classes': num_classes,
+            'label_mapper': label_mapper
+        }
         
+        # Include samplers in the result if distributed
+        if distributed and torch.distributed.is_initialized():
+            samplers = {
+                'train': train_sampler,
+                'val': val_sampler
+            }
+            # Add test samplers
+            for test_split in test_splits:
+                if test_split == 'test_id':
+                    loader_name = 'test'
+                else:
+                    loader_name = f'test_{test_split}' if not test_split.startswith('test_') else test_split
+                samplers[loader_name] = loaders[loader_name].sampler
+            
+            result['samplers'] = samplers
+            result['is_distributed'] = True
+        else:
+            result['is_distributed'] = False
+        
+        return result
