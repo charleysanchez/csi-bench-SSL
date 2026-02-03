@@ -1,6 +1,6 @@
 import os
 from torch.utils.data import DataLoader
-from dataset import CSIDataset
+from .dataset import CSIDataset
 import torch
 import json
 

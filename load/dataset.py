@@ -89,6 +89,9 @@ class CSIDataset(Dataset):
                 f"Label Column '{label_column}' not found in metadata"
             )
 
+        # filter for missing samples from split file
+        self._filter_existing_files()
+
         print(
             f"Loaded {len(self.split_metadata)} samples for {task} - {split}"
         )
@@ -108,7 +111,7 @@ class CSIDataset(Dataset):
 
             # path within metadata is relative to task directory
             subPath = row["file_path"]
-            fullPath = os.path.join(self.task_dir, subPath)
+            fullPath = os.path.normpath(os.path.join(self.task_dir, subPath))
 
             # load in .h5 files (only working with this rn)
             with h5py.File(fullPath, "r") as f:
@@ -118,8 +121,8 @@ class CSIDataset(Dataset):
                     )
                     return None
 
-            if self.data_key in f:
-                csi_data = np.array(f[self.data_key])
+                if self.data_key in f.keys():
+                    csi_data = np.array(f[self.data_key])
 
             # check for valid data
             if csi_data is None or csi_data.size == 0:
@@ -171,3 +174,19 @@ class CSIDataset(Dataset):
     
     def get_label_names(self):
         return self.split_metadata[self.label_column].unique().to_list()
+    
+    def _filter_existing_files(self):
+        keep_rows = []
+        missing = 0
+
+        for _, row in self.split_metadata.iterrows():
+            fullPath = os.path.normpath(os.path.join(self.task_dir, row["file_path"]))
+            if os.path.exists(fullPath):
+                keep_rows.append(row)
+            else:
+                missing += 1
+
+        self.split_metadata = pd.DataFrame(keep_rows).reset_index(drop=True)
+
+        if missing > 0:
+            print(f"[CSIDataset] dropped {missing} missing samples")
