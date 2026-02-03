@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 import torch
-import torch.nn.Functional as F
+import torch.nn.functional as F
 
 
 class CSIDataset(Dataset):
