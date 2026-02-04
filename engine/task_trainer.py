@@ -105,6 +105,23 @@ class TaskTrainer(BaseTrainer):
         if self.checkpoint_path is not None:
             self.load_checkpoint(checkpoint_path)
 
+        # create optimizer if necessary
+        if optimizer is None:
+            assert config is not None, "Config required to create optimizer"
+            self.optimizer = torch.optim.AdamW(
+                self.model.parameters(),
+                lr=getattr(config, "lr", 1e-3),
+                weight_decay=getattr(config, "weight_decay", 0.0),
+            )
+        else:
+            self.optimizer = optimizer
+
+        if scheduler is None:
+            self.setup_scheduler()
+        else:
+            self.scheduler = scheduler
+
+
         # log
         self.train_losses = []
         self.train_accs = []
@@ -528,6 +545,10 @@ class TaskTrainer(BaseTrainer):
                 data_loader = self.test_loader
             else:
                 raise ValueError(f"No data loader available for mode {mode}")
+            
+        if self.label_mapper is None:
+            self.label_mapper = data_loader.dataset.label_mapper
+
 
         # collect all predictions and labels
         all_preds = []
@@ -555,15 +576,7 @@ class TaskTrainer(BaseTrainer):
 
                 # forward pass
                 outputs = self.model(data)
-                if outputs.ndim == 2 and outputs.size(1) > 1:
-                    # multi-class
-                    preds = torch.argmax(outputs, dim=1)
-                else:
-                    # binary
-                    if isinstance(self.criterion, nn.BCEWithLogitsLoss):
-                        preds = (outputs > 0).long().squeeze()
-                    else:
-                        preds = (outputs > 0.5).long().squeeze()
+                preds = predict_from_outputs(outputs=outputs, criterion=self.criterion)
 
                 # collect all predictions and labels
                 all_preds.extend(preds.cpu().numpy())
