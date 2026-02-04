@@ -1,41 +1,66 @@
+import copy
 import os
-import json
 import time
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import seaborn as sns
-import copy
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+)
 from torch.optim.lr_scheduler import LambdaLR
-from engine.base_trainer import BaseTrainer
 from tqdm import tqdm
+
+from engine.base_trainer import BaseTrainer
+from utils.labels import normalize_labels
+from utils.logging import log_epoch
+from utils.training import predict_from_outputs
 
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
     """Warmup learning rate scheduler with cosine annealing."""
+
     def lr_lambda(epoch):
         if epoch < warmup_epochs:
             return (epoch + 1) / max(1, warmup_epochs)
         else:
-            progress = (epoch - warmup_epochs) / max(1, total_epochs - warmup_epochs)
+            progress = (epoch - warmup_epochs) / max(
+                1, total_epochs - warmup_epochs
+            )
             cosine = 0.5 * (1 + np.cos(np.pi * progress))
             return min_lr_ratio + (1 - min_lr_ratio) * cosine
-        
+
     return LambdaLR(optimizer, lr_lambda)
+
 
 class TaskTrainer(BaseTrainer):
     """Trainer for supervised learning tasks with CSI data."""
 
-    def __init__(self, model, train_loader, val_loader=None, test_loader=None, criterion=None, optimizer=None, 
-                 scheduler=None, device='cuda:0', save_path='./results', checkpoint_path=None, 
-                 num_classes=None, label_mapper=None, config=None, distributed=False, local_rank=0):
+    def __init__(
+        self,
+        model,
+        train_loader,
+        val_loader=None,
+        test_loader=None,
+        criterion=None,
+        optimizer=None,
+        scheduler=None,
+        device="cuda:0",
+        save_path="./results",
+        checkpoint_path=None,
+        num_classes=None,
+        label_mapper=None,
+        config=None,
+        distributed=False,
+        local_rank=0,
+    ):
         """
         Initialize the task trainer.
-        
+
         Args:
             model: PyTorch model
             train_loader: Training data loader
@@ -94,10 +119,14 @@ class TaskTrainer(BaseTrainer):
 
     def setup_scheduler(self):
         """Set up learning rate scheduler."""
-        warmup_epochs = getattr(self.config, 'warmup_epochs', 5)
-        total_epochs = getattr(self.config, 'epochs', 100)
-        self.scheduler = warmup_cosine_lr(self.optimizer, warmup_epochs=warmup_epochs, total_epochs=total_epochs)
-        
+        warmup_epochs = getattr(self.config, "warmup_epochs", 5)
+        total_epochs = getattr(self.config, "epochs", 100)
+        self.scheduler = warmup_cosine_lr(
+            self.optimizer,
+            warmup_epochs=warmup_epochs,
+            total_epochs=total_epochs,
+        )
+
     def train(self):
         """Train the model."""
         if not self.distributed or (self.distributed and self.local_rank == 0):
@@ -114,25 +143,31 @@ class TaskTrainer(BaseTrainer):
             # number of epochs and patience from config
             # handle both object attributes and dictionary keys
             if isinstance(self.config, dict):
-                epochs = self.config.get('epochs', 30)
-                patience = self.config.get('epochs', 15)
+                epochs = self.config.get("epochs", 30)
+                patience = self.config.get("epochs", 15)
             else:
-                epochs = getattr(self.config, 'epochs', 30)
-                patience = getattr(self.config, 'patience', 15)
+                epochs = getattr(self.config, "epochs", 30)
+                patience = getattr(self.config, "patience", 15)
 
         # best model state
         best_model = None
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
 
         for epoch in range(epochs):
             self.current_epoch = epoch
 
             # only print from rank 0 in distributed mode
-            if not self.distributed or (self.distributed and self.local_rank == 0):
-                print(f'Epoch {epoch+1}/{epochs}')
+            if not self.distributed or (
+                self.distributed and self.local_rank == 0
+            ):
+                print(f"Epoch {epoch + 1}/{epochs}")
 
             # set epoch for distributed sampler
-            if self.distributed and hasattr(self.train_loader, 'sampler') and hasattr(self.train_loader.sampler, 'set_epoch'):
+            if (
+                self.distributed
+                and hasattr(self.train_loader, "sampler")
+                and hasattr(self.train_loader.sampler, "set_epoch")
+            ):
                 self.train_loader.sampler.set_epoch(epoch)
 
             # train one epoch
@@ -146,26 +181,35 @@ class TaskTrainer(BaseTrainer):
             self.val_losses.append(val_loss)
             self.train_accuracies.append(train_acc)
             self.val_accuracies.append(val_acc)
-            
+
             # step scheduler
             self.scheduler.step()
 
             # only log from rank 0 in distributed mode
-            if not self.distributed or (self.distributed and self.local_rank == 0):
+            if not self.distributed or (
+                self.distributed and self.local_rank == 0
+            ):
                 # record for this epoch
                 record = {
-                    'Epoch': epoch + 1,
-                    'Train Loss': train_loss,
-                    'Val Loss': val_loss,
-                    'Train Accuracy': train_acc,
-                    'Val Accuracy': val_acc,
-                    'Time per sample': train_time
+                    "Epoch": epoch + 1,
+                    "Train Loss": train_loss,
+                    "Val Loss": val_loss,
+                    "Train Accuracy": train_acc,
+                    "Val Accuracy": val_acc,
+                    "Time per sample": train_time,
                 }
                 records.append(record)
-                
-                print(f'Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
-                print(f'Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}')
-                print(f'Time per sample: {train_time:.6f} seconds')
+
+                print(
+                    f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
+                )
+                print(f"Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}")
+                print(f"Time per sample: {train_time:.6f} seconds")
+
+                lr = self.optimizer.param_groups[0]["lr"]
+                log_epoch(
+                    epoch + 1, train_loss, train_acc, val_loss, val_acc, lr
+                )
 
             # early stopping check
             if val_loss < best_val_loss:
@@ -174,35 +218,48 @@ class TaskTrainer(BaseTrainer):
                 best_model = copy.deepcopy(self.model.state_dict())
 
                 # save the best model - only from rank 0 in distributed mode
-                if not self.distributed or (self.distributed and self.local_rank == 0):
-                    best_model_path = os.path.join(self.save_path, "best_model.pt")
-                    torch.save({
-                        'model_state_dict': self.model.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'val_loss': val_loss,
-                        'epoch': epoch,
-                    }, best_model_path)
+                if not self.distributed or (
+                    self.distributed and self.local_rank == 0
+                ):
+                    best_model_path = os.path.join(
+                        self.save_path, "best_model.pt"
+                    )
+                    torch.save(
+                        {
+                            "model_state_dict": self.model.state_dict(),
+                            "optimizer_state_dict": self.optimizer.state_dict(),
+                            "val_loss": val_loss,
+                            "epoch": epoch,
+                        },
+                        best_model_path,
+                    )
                     print(f"Best model saved to {best_model_path}")
 
                 self.best_epoch = epoch + 1
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= patience:
-                    if not self.distributed or (self.distributed and self.local_rank == 0):
-                        print(f'Early stopping triggered after {patience} epochs without improvement.')
+                    if not self.distributed or (
+                        self.distributed and self.local_rank == 0
+                    ):
+                        print(
+                            f"Early stopping triggered after {patience} epochs without improvement."
+                        )
                     self.model.load_state_dict(best_model)
                     break
 
             # only perform final steps from rank 0 in distributed mode
-            if not self.distributed or (self.distributed and self.local_rank == 0):
+            if not self.distributed or (
+                self.distributed and self.local_rank == 0
+            ):
                 # create results dataframe
                 results_df = pd.DataFrame(records)
 
                 # save results
-                results_df.to_csv(os.path.join(self.save_path, "training_results.csv"), index=False)
-
-                # plot results
-                self.plot_training_results()
+                results_df.to_csv(
+                    os.path.join(self.save_path, "training_results.csv"),
+                    index=False,
+                )
 
             # get the best validation accuracy and its corresponding epoch
             if len(self.val_accuracies) > 0:
@@ -220,18 +277,23 @@ class TaskTrainer(BaseTrainer):
                 "train_accuracy_history": self.train_accuracies,
                 "val_accuracy_history": self.val_accuracies,
                 "best_epoch": best_epoch,
-                "best_val_accuracy": best_val_accuracy
+                "best_val_accuracy": best_val_accuracy,
             }
 
             # only include dataframe if non-distributed or rank 0
-            if not self.distributed or (self.distributed and self.local_rank == 0):
-                training_results['training_dataframe'] = results_df
+            if not self.distributed or (
+                self.distributed and self.local_rank == 0
+            ):
+                training_results["training_dataframe"] = results_df
 
+        if best_model is not None:
+            self.model.load_state_dict(best_model)
+        self.plot_training_results()
         return self.model, training_results
-        
+
     def train_epoch(self):
         """Train the model for a single epoch.
-        
+
         Returns:
             A tuple of (loss, accuracy, time_per_sample).
         """
@@ -241,10 +303,18 @@ class TaskTrainer(BaseTrainer):
         total_samples = 0
         total_time = 0.0
 
-        for inputs, labels in self.train_loader:
+        loader = tqdm(
+            self.train_loader,
+            desc=f"Epoch {self.current_epoch + 1}",
+            leave=False,
+        )
+
+        for inputs, labels in loader:
             # skip empty batches (from custom_collate_fn if all samples were None)
             if inputs.size(0) == 0:
                 continue
+
+            start_time = time.perf_counter()
 
             batch_size = inputs.size(0)
             total_samples += batch_size
@@ -252,30 +322,12 @@ class TaskTrainer(BaseTrainer):
             # transfer to device
             inputs = inputs.to(self.device)
 
-            # handle cases where labels might be a tuple
-            if isinstance(labels, tuple):
-                labels = labels[0]
-
-            # handle case where labels might be strings or scalars
-            if isinstance(labels, str):
-                try:
-                    # Create a tensor of the same value repeated batch_size times
-                    label_value = int(labels)
-                    labels = torch.tensor([label_value] * batch_size).to(self.device)
-                except Exception:
-                    labels = torch.zeros(batch_size, dtype=torch.long).to(self.device)
-            elif not hasattr(labels, 'shape') or len(labels.shape) == 0:
-                # Handle scalar labels by repeating them
-                label_value = int(labels)
-                labels = torch.tensor([label_value] * batch_size).to(self.device)
-            else:
-                # If it's already a batch, just move to device
-                labels = labels.to(self.device)
-
-            if self.criterion.__class__.__name__ in ['BCELoss', 'BCEWithLogitsLoss']:
-                labels = labels.view(-1, 1)
-
-            start_time = time.perf_counter()
+            labels = normalize_labels(
+                labels=labels,
+                batch_size=batch_size,
+                device=self.device,
+                criterion=self.criterion,
+            )
 
             # forward pass
             self.optimizer.zero_grad()
@@ -286,26 +338,23 @@ class TaskTrainer(BaseTrainer):
             # backward pass
             loss.backward()
             # gradient clipping
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=1.0
+            )
             self.optimizer.step()
-
-            # measure elapsed time
-            elapsed_time = time.perf_counter() - start_time
-            total_time += elapsed_time
 
             # accumulate loss and accuracy
             epoch_loss += loss.item() * batch_size
 
-            # calculate accuracy
-            if outputs.shape[1] > 1: # multi-class
-                predicted = torch.argmax(outputs, dim=1)
-            elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
-                predicted = (outputs > 0).long()
-            else:
-                predicted = (outputs > 0.5).long()
-
-            correct = (predicted == labels).sum().item()
+            preds = predict_from_outputs(outputs, criterion=self.criterion)
+            correct = (preds.view(-1) == labels.view(-1).long()).sum().item()
             epoch_accuracy += correct
+
+            # measure elapsed time
+            total_time += time.perf_counter() - start_time
+
+            # update progress bar
+            loader.set_postfix(loss=loss.item())
 
         # calculate averages
         epoch_loss /= total_samples
@@ -315,31 +364,36 @@ class TaskTrainer(BaseTrainer):
         # Synchronize metrics across processes in distributed training
         if self.distributed and torch.distributed.is_initialized():
             # Create tensors for each metric
-            metrics = torch.tensor([
-                        epoch_loss * total_samples,
-                        epoch_accuracy * total_samples,
-                        total_time,
-                        total_samples
-                    ], device=self.device)
-            
+            metrics = torch.tensor(
+                [
+                    epoch_loss * total_samples,
+                    epoch_accuracy * total_samples,
+                    total_time,
+                    total_samples,
+                ],
+                device=self.device,
+            )
+
             # All-reduce to compute mean across processes
-            torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
-            
+            torch.distributed.all_reduce(
+                metrics, op=torch.distributed.ReduceOp.SUM
+            )
+
             # Get world size for averaging
             world_size = torch.distributed.get_world_size()
             metrics /= world_size
-            
+
             # Extract metrics
             epoch_loss = metrics[0] / metrics[3]
             epoch_accuracy = metrics[1] / metrics[3]
             time_per_sample = metrics[2] / metrics[3]
-    
+
         return epoch_loss, epoch_accuracy, time_per_sample
-    
+
     def evaluate(self, data_loader):
         """
         Evaluate the model.
-        
+
         Args:
             data_loader: the data loader to use for the evaluation.
 
@@ -359,50 +413,30 @@ class TaskTrainer(BaseTrainer):
 
                 batch_size = inputs.size(0)
                 total_samples += batch_size
-                
+
                 # transfer to device
                 inputs = inputs.to(self.device)
-                # handle case where labels might be a tuple
-                if isinstance(labels, tuple):
-                    labels = labels[0]
+                labels = normalize_labels(
+                    labels=labels,
+                    batch_size=batch_size,
+                    device=self.device,
+                    criterion=self.criterion,
+                )
 
-        # handle case where labels might be strings or scalars
-            if isinstance(labels, str):
-                try:
-                    # Create a tensor of the same value repeated batch_size times
-                    label_value = int(labels)
-                    labels = torch.tensor([label_value] * batch_size).to(self.device)
-                except Exception:
-                    labels = torch.zeros(batch_size, dtype=torch.long).to(self.device)
-            elif not hasattr(labels, 'shape') or len(labels.shape) == 0:
-                # Handle scalar labels by repeating them
-                label_value = int(labels)
-                labels = torch.tensor([label_value] * batch_size).to(self.device)
-            else:
-                # If it's already a batch, just move to device
-                labels = labels.to(self.device)
+                # forward pass
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
 
-            if self.criterion.__class__.__name__ in ['BCELoss', 'BCEWithLogitsLoss']:
-                labels = labels.view(-1, 1)
+                # accumulate loss
+                total_loss += loss.item() * batch_size
 
-            # forward pass
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, labels)
+                # calculate accuracy
+                preds = predict_from_outputs(
+                    outputs=outputs, criterion=self.criterion
+                )
+                correct = (preds.view(-1) == labels.view(-1).long()).sum().item()
 
-            # accumulate loss
-            total_loss += loss.item() * batch_size
-
-             # calculate accuracy
-            if outputs.shape[1] > 1: # multi-class
-                predicted = torch.argmax(outputs, dim=1)
-            elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
-                predicted = (outputs > 0).long()
-            else:
-                predicted = (outputs > 0.5).long()
-            
-            correct = (predicted == labels).sum().item()
-
-            total_correct += correct
+                total_correct += correct
 
         # calculate averages
         avg_loss = total_loss / total_samples
@@ -411,55 +445,60 @@ class TaskTrainer(BaseTrainer):
         # Synchronize metrics across processes in distributed training
         if self.distributed and torch.distributed.is_initialized():
             # Create tensors for each metric
-            metrics = torch.tensor([avg_loss, accuracy, total_samples], 
-                                 dtype=torch.float, device=self.device)
-            
+            metrics = torch.tensor(
+                [avg_loss, accuracy, total_samples],
+                dtype=torch.float,
+                device=self.device,
+            )
+
             # All-reduce to compute mean across processes
-            torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
-            
+            torch.distributed.all_reduce(
+                metrics, op=torch.distributed.ReduceOp.SUM
+            )
+
             # Get world size for averaging
             world_size = torch.distributed.get_world_size()
-            
+
             # For loss and accuracy we want the average, but we need to account for the
             # different number of samples each process may have processed
             world_samples = metrics[2].item()
             if world_samples > 0:
                 avg_loss = metrics[0].item() * world_size / world_samples
                 accuracy = metrics[1].item() * world_size / world_samples
-        
+
         return avg_loss, accuracy
-    
+
     def plot_training_results(self):
         """Plot the training results."""
         # create figure with 2x2 subplots
-        fig, axs = plt.subplots(2, 2, figsize=(15,10))
+        fig, axs = plt.subplots(2, 2, figsize=(15, 10))
 
         # plot the training loss
         axs[0, 0].plot(self.train_losses)
-        axs[0, 0].set_title('Training Loss')
-        axs[0, 0].set_xlabel('Epoch')
-        axs[0, 0].set_ylabel('Loss')
+        axs[0, 0].set_title("Training Loss")
+        axs[0, 0].set_xlabel("Epoch")
+        axs[0, 0].set_ylabel("Loss")
         axs[0, 0].grid(True)
 
         # plot the validation loss
         axs[0, 1].plot(self.val_losses)
-        axs[0, 1].set_title('Validation Loss')
-        axs[0, 1].set_xlabel('Epoch')
-        axs[0, 1].set_ylabel('Loss')
+        axs[0, 1].set_title("Validation Loss")
+        axs[0, 1].set_xlabel("Epoch")
+        axs[0, 1].set_ylabel("Loss")
         axs[0, 1].grid(True)
 
         # plot the training accuracy
         axs[1, 0].plot(self.train_accuracies)
-        axs[1, 0].set_title('Training Accuracy')
-        axs[1, 0].set_xlabel('Epoch')
-        axs[1, 0].set_ylabel('Accuracy')
+        axs[1, 0].set_title("Training Accuracy")
+        axs[1, 0].set_xlabel("Epoch")
+        axs[1, 0].set_ylabel("Accuracy")
         axs[1, 0].grid(True)
 
         # plot the validation accuracy
-        axs[1, 1].plot(self.train_accuracies)
-        axs[1, 1].set_title('Validation Accuracy')
-        axs[1, 1].set_xlabel('Epoch')
-        axs[1, 1].set_ylabel('Accuracy')
+        axs[1, 1].plot(self.val_accuracies)
+        axs[1, 1].set_title("Validation Accuracy")
+        axs[1, 1].set_xlabel("Epoch")
+        axs[1, 1].set_ylabel("Accuracy")
         axs[1, 1].grid(True)
 
         plt.tight_layout()
@@ -469,7 +508,7 @@ class TaskTrainer(BaseTrainer):
         # also plot the confusion matrix
         self.plot_confusion_matrix()
 
-    def plot_confusion_matrix(self, data_loader=None, epoch=None, mode='val'):
+    def plot_confusion_matrix(self, data_loader=None, epoch=None, mode="val"):
         """
         Plot the confusion matrix and save the figure.
 
@@ -489,7 +528,7 @@ class TaskTrainer(BaseTrainer):
                 data_loader = self.test_loader
             else:
                 raise ValueError(f"No data loader available for mode {mode}")
-            
+
         # collect all predictions and labels
         all_preds = []
         all_labels = []
@@ -526,9 +565,8 @@ class TaskTrainer(BaseTrainer):
                     else:
                         preds = (outputs > 0.5).long().squeeze()
 
-
                 # collect all predictions and labels
-                all_preds.extend(preds.cpu().nupmy())
+                all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
 
         # convert to numpy arrays
@@ -538,20 +576,30 @@ class TaskTrainer(BaseTrainer):
         # get class names if available
         class_names = None
         if self.label_mapper is not None:
-            class_names = [list(self.label_mapper['label_to_idx'].keys())]
+            class_names = list(self.label_mapper["label_to_idx"].keys())
 
         # plot confusion matrix
         cm = confusion_matrix(all_labels, all_preds)
         plt.figure(figsize=(10, 8))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
-                    xticklabels=class_names, yticklabels=class_names)
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            xticklabels=class_names,
+            yticklabels=class_names,
+        )
         plt.xlabel("Predicted")
         plt.ylabel("True")
         plt.title(f"Confusion Matrix ({mode})")
 
         # save figure
         epoch_str = f"_epoch{epoch}" if epoch is not None else ""
-        plt.savefig(os.path.join(self.save_path, f"confusion_matrix{mode}{epoch_str}.png"))
+        plt.savefig(
+            os.path.join(
+                self.save_path, f"confusion_matrix{mode}{epoch_str}.png"
+            )
+        )
         plt.close()
 
         # generate and save classification report
@@ -572,14 +620,18 @@ class TaskTrainer(BaseTrainer):
                     new_index.append(index_to_name[idx])
                 else:
                     new_index.append(idx)
-                
+
             report_df.index = new_index
 
         # save report
-        report_df.to_csv(os.path.join(self.save_path, f"classification_report_{mode}{epoch_str}.csv"))
+        report_df.to_csv(
+            os.path.join(
+                self.save_path, f"classification_report_{mode}{epoch_str}.csv"
+            )
+        )
 
         return report_df
-    
+
     def calculate_metrics(self, data_loader, epoch=None):
         """
         Calculate overall performance metrics, including weighted F1 score.
@@ -600,7 +652,7 @@ class TaskTrainer(BaseTrainer):
 
         # no gradient during evaluation
         with torch.no_grad():
-            for batch in self.data_loader:
+            for batch in data_loader:
                 # get inputs and move to device
                 if isinstance(batch, (list, tuple)) and len(batch) == 2:
                     inputs, labels = batch
@@ -609,7 +661,7 @@ class TaskTrainer(BaseTrainer):
                     labels = batch["label"]
 
                 # skip empty batches
-                if inputs.size(0):
+                if inputs.size(0) == 0:
                     continue
 
                 inputs = inputs.to(self.device)
@@ -626,7 +678,7 @@ class TaskTrainer(BaseTrainer):
                         preds = (outputs > 0).long().squeeze()
                     else:
                         preds = (outputs > 0.5).long().squeeze()
-                
+
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
 
@@ -636,41 +688,57 @@ class TaskTrainer(BaseTrainer):
 
         # validate data before calculating metrics
         if len(all_preds) == 0 or len(all_labels) == 0:
-            print("Warning: Empty prediction or target arrays, skipping F1 calculation.")
+            print(
+                "Warning: Empty prediction or target arrays, skipping F1 calculation."
+            )
             return 0.0, pd.DataFrame()
-        
+
         if len(all_preds) != len(all_labels):
-            print(f"Warning: Prediction and Label array lengths don't match: {len(all_preds)} vs {len(all_labels)}")
+            print(
+                f"Warning: Prediction and Label array lengths don't match: {len(all_preds)} vs {len(all_labels)}"
+            )
             return 0.0, pd.DataFrame()
-        
+
         # print some debug information
-        print(f"Predictions shape: {all_preds.shape}, unique values: {np.unique(all_preds)}")
-        print(f"Labels shape: {all_labels.shape}, unique values: {np.unique(all_labels)}")
+        print(
+            f"Predictions shape: {all_preds.shape}, unique values: {np.unique(all_preds)}"
+        )
+        print(
+            f"Labels shape: {all_labels.shape}, unique values: {np.unique(all_labels)}"
+        )
 
         # calculate weighted f1 score
-        from sklearn.metrics import f1_score, classification_report
-        weighted_f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+        from sklearn.metrics import classification_report, f1_score
+
+        weighted_f1 = f1_score(
+            all_labels, all_preds, average="weighted", zero_division=0
+        )
 
         # calculate per-class f1 scores
-        per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+        per_class_f1 = f1_score(
+            all_labels, all_preds, average=None, zero_division=0
+        )
 
         # get detailed classification report
-        report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
+        report = classification_report(
+            all_labels, all_preds, output_dict=True, zero_division=0
+        )
 
         # save the report to a CSV file if epoch is None (final evaluation)
-        if epoch is None and hasattr(self, 'save_path'):
+        if epoch is None and hasattr(self, "save_path"):
             # convert report to DataFrame
             report_df = pd.DataFrame(report).transpose()
-            
+
             # determine split name from data_loader (assuming it's in the dataloader's dataset attributes)
-            split_name = getattr(data_loader.dataset, 'split', 'unknown')
-            
+            split_name = getattr(data_loader.dataset, "split", "unknown")
+
             # save to CSV
-            report_path = os.path.join(self.save_path, f'classification_report_{split_name}.csv')
+            report_path = os.path.join(
+                self.save_path, f"classification_report_{split_name}.csv"
+            )
             report_df.to_csv(report_path)
             print(f"Classification report saved to {report_path}")
-            
+
             return weighted_f1, report_df
-        
+
         return weighted_f1, pd.DataFrame(report).transpose()
-    
