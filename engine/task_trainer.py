@@ -227,7 +227,7 @@ class TaskTrainer(BaseTrainer):
             if not self.distributed or (self.distributed and self.local_rank == 0):
                 training_results['training_dataframe'] = results_df
 
-            return self.model, training_results
+        return self.model, training_results
         
     def train_epoch(self):
         """Train the model for a single epoch.
@@ -299,7 +299,7 @@ class TaskTrainer(BaseTrainer):
             # calculate accuracy
             if outputs.shape[1] > 1: # multi-class
                 predicted = torch.argmax(outputs, dim=1)
-            if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+            elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
                 predicted = (outputs > 0).long()
             else:
                 predicted = (outputs > 0.5).long()
@@ -395,7 +395,7 @@ class TaskTrainer(BaseTrainer):
              # calculate accuracy
             if outputs.shape[1] > 1: # multi-class
                 predicted = torch.argmax(outputs, dim=1)
-            if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+            elif isinstance(self.criterion, nn.BCEWithLogitsLoss):
                 predicted = (outputs > 0).long()
             else:
                 predicted = (outputs > 0.5).long()
