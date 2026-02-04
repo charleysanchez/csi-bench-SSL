@@ -229,110 +229,448 @@ class TaskTrainer(BaseTrainer):
 
             return self.model, training_results
         
-        def train_epoch(self):
-            """Train the model for a single epoch.
-            
-            Returns:
-                A tuple of (loss, accuracy, time_per_sample).
-            """
-            self.model.train()
-            epoch_loss = 0.0
-            epoch_accuracy = 0.0
-            total_samples = 0
-            total_time = 0.0
+    def train_epoch(self):
+        """Train the model for a single epoch.
+        
+        Returns:
+            A tuple of (loss, accuracy, time_per_sample).
+        """
+        self.model.train()
+        epoch_loss = 0.0
+        epoch_accuracy = 0.0
+        total_samples = 0
+        total_time = 0.0
 
-            for inputs, labels in self.train_loader:
-                # skip empty batches (from custom_collate_fn if all samples were None)
+        for inputs, labels in self.train_loader:
+            # skip empty batches (from custom_collate_fn if all samples were None)
+            if inputs.size(0) == 0:
+                continue
+
+            batch_size = inputs.size(0)
+            total_samples += batch_size
+
+            # transfer to device
+            inputs = inputs.to(self.device)
+
+            # handle cases where labels might be a tuple
+            if isinstance(labels, tuple):
+                labels = labels[0]
+
+            # handle case where labels might be strings or scalars
+            if isinstance(labels, str):
+                try:
+                    # Create a tensor of the same value repeated batch_size times
+                    label_value = int(labels)
+                    labels = torch.tensor([label_value] * batch_size).to(self.device)
+                except Exception:
+                    labels = torch.zeros(batch_size, dtype=torch.long).to(self.device)
+            elif not hasattr(labels, 'shape') or len(labels.shape) == 0:
+                # Handle scalar labels by repeating them
+                label_value = int(labels)
+                labels = torch.tensor([label_value] * batch_size).to(self.device)
+            else:
+                # If it's already a batch, just move to device
+                labels = labels.to(self.device)
+
+            if self.criterion.__class__.__name__ in ['BCELoss', 'BCEWithLogitsLoss']:
+                labels = labels.view(-1, 1)
+
+            start_time = time.perf_counter()
+
+            # forward pass
+            self.optimizer.zero_grad()
+            outputs = self.model(inputs)
+
+            loss = self.criterion(outputs, labels)
+
+            # backward pass
+            loss.backward()
+            # gradient clipping
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            self.optimizer.step()
+
+            # measure elapsed time
+            elapsed_time = time.perf_counter() - start_time
+            total_time += elapsed_time
+
+            # accumulate loss and accuracy
+            epoch_loss += loss.item() * batch_size
+
+            # calculate accuracy
+            if outputs.shape[1] > 1: # multi-class
+                predicted = torch.argmax(outputs, dim=1)
+            if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+                predicted = (outputs > 0).long()
+            else:
+                predicted = (outputs > 0.5).long()
+
+            correct = (predicted == labels).sum().item()
+            epoch_accuracy += correct
+
+        # calculate averages
+        epoch_loss /= total_samples
+        epoch_accuracy /= total_samples
+        time_per_sample = total_time / total_samples
+
+        # Synchronize metrics across processes in distributed training
+        if self.distributed and torch.distributed.is_initialized():
+            # Create tensors for each metric
+            metrics = torch.tensor([
+                        epoch_loss * total_samples,
+                        epoch_accuracy * total_samples,
+                        total_time,
+                        total_samples
+                    ], device=self.device)
+            
+            # All-reduce to compute mean across processes
+            torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
+            
+            # Get world size for averaging
+            world_size = torch.distributed.get_world_size()
+            metrics /= world_size
+            
+            # Extract metrics
+            epoch_loss = metrics[0] / metrics[3]
+            epoch_accuracy = metrics[1] / metrics[3]
+            time_per_sample = metrics[2] / metrics[3]
+    
+        return epoch_loss, epoch_accuracy, time_per_sample
+    
+    def evaluate(self, data_loader):
+        """
+        Evaluate the model.
+        
+        Args:
+            data_loader: the data loader to use for the evaluation.
+
+        Returns:
+            A tuple of (loss, accuracy).
+        """
+        self.model.eval()
+        total_loss = 0.0
+        total_correct = 0
+        total_samples = 0
+
+        with torch.no_grad():
+            for inputs, labels in data_loader:
+                # skip empy batches
                 if inputs.size(0) == 0:
                     continue
 
                 batch_size = inputs.size(0)
                 total_samples += batch_size
-
+                
                 # transfer to device
                 inputs = inputs.to(self.device)
-
-                # handle cases where labels might be a tuple
+                # handle case where labels might be a tuple
                 if isinstance(labels, tuple):
                     labels = labels[0]
 
-                # handle case where labels might be strings or scalars
-                if isinstance(labels, str):
-                    try:
-                        # Create a tensor of the same value repeated batch_size times
-                        label_value = int(labels)
-                        labels = torch.tensor([label_value] * batch_size).to(self.device)
-                    except Exception:
-                        labels = torch.zeros(batch_size, dtype=torch.long).to(self.device)
-                elif not hasattr(labels, 'shape') or len(labels.shape) == 0:
-                    # Handle scalar labels by repeating them
+        # handle case where labels might be strings or scalars
+            if isinstance(labels, str):
+                try:
+                    # Create a tensor of the same value repeated batch_size times
                     label_value = int(labels)
                     labels = torch.tensor([label_value] * batch_size).to(self.device)
+                except Exception:
+                    labels = torch.zeros(batch_size, dtype=torch.long).to(self.device)
+            elif not hasattr(labels, 'shape') or len(labels.shape) == 0:
+                # Handle scalar labels by repeating them
+                label_value = int(labels)
+                labels = torch.tensor([label_value] * batch_size).to(self.device)
+            else:
+                # If it's already a batch, just move to device
+                labels = labels.to(self.device)
+
+            if self.criterion.__class__.__name__ in ['BCELoss', 'BCEWithLogitsLoss']:
+                labels = labels.view(-1, 1)
+
+            # forward pass
+            outputs = self.model(inputs)
+            loss = self.criterion(outputs, labels)
+
+            # accumulate loss
+            total_loss += loss.item() * batch_size
+
+             # calculate accuracy
+            if outputs.shape[1] > 1: # multi-class
+                predicted = torch.argmax(outputs, dim=1)
+            if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+                predicted = (outputs > 0).long()
+            else:
+                predicted = (outputs > 0.5).long()
+            
+            correct = (predicted == labels).sum().item()
+
+            total_correct += correct
+
+        # calculate averages
+        avg_loss = total_loss / total_samples
+        accuracy = total_correct / total_samples
+
+        # Synchronize metrics across processes in distributed training
+        if self.distributed and torch.distributed.is_initialized():
+            # Create tensors for each metric
+            metrics = torch.tensor([avg_loss, accuracy, total_samples], 
+                                 dtype=torch.float, device=self.device)
+            
+            # All-reduce to compute mean across processes
+            torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
+            
+            # Get world size for averaging
+            world_size = torch.distributed.get_world_size()
+            
+            # For loss and accuracy we want the average, but we need to account for the
+            # different number of samples each process may have processed
+            world_samples = metrics[2].item()
+            if world_samples > 0:
+                avg_loss = metrics[0].item() * world_size / world_samples
+                accuracy = metrics[1].item() * world_size / world_samples
+        
+        return avg_loss, accuracy
+    
+    def plot_training_results(self):
+        """Plot the training results."""
+        # create figure with 2x2 subplots
+        fig, axs = plt.subplots(2, 2, figsize=(15,10))
+
+        # plot the training loss
+        axs[0, 0].plot(self.train_losses)
+        axs[0, 0].set_title('Training Loss')
+        axs[0, 0].set_xlabel('Epoch')
+        axs[0, 0].set_ylabel('Loss')
+        axs[0, 0].grid(True)
+
+        # plot the validation loss
+        axs[0, 1].plot(self.val_losses)
+        axs[0, 1].set_title('Validation Loss')
+        axs[0, 1].set_xlabel('Epoch')
+        axs[0, 1].set_ylabel('Loss')
+        axs[0, 1].grid(True)
+
+        # plot the training accuracy
+        axs[1, 0].plot(self.train_accuracies)
+        axs[1, 0].set_title('Training Accuracy')
+        axs[1, 0].set_xlabel('Epoch')
+        axs[1, 0].set_ylabel('Accuracy')
+        axs[1, 0].grid(True)
+
+        # plot the validation accuracy
+        axs[1, 1].plot(self.train_accuracies)
+        axs[1, 1].set_title('Validation Accuracy')
+        axs[1, 1].set_xlabel('Epoch')
+        axs[1, 1].set_ylabel('Accuracy')
+        axs[1, 1].grid(True)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_path, "training_results.png"))
+        plt.close()
+
+        # also plot the confusion matrix
+        self.plot_confusion_matrix()
+
+    def plot_confusion_matrix(self, data_loader=None, epoch=None, mode='val'):
+        """
+        Plot the confusion matrix and save the figure.
+
+        Args:
+            data_loader: Dataloader to use for the evaluation
+            epoch: Current epoch
+            mode: 'val or 'test' mode
+        """
+        # set evaluation mode
+        self.model.eval()
+
+        # use validation loader if not specified
+        if data_loader is None:
+            if mode == "val" and self.val_loader is not None:
+                data_loader = self.val_loader
+            elif mode == "test" and self.test_loader is not None:
+                data_loader = self.test_loader
+            else:
+                raise ValueError(f"No data loader available for mode {mode}")
+            
+        # collect all predictions and labels
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for batch in data_loader:
+                # get data and labels
+                if isinstance(batch, dict):
+                    data = batch["data"]
+                    labels = batch["labels"]
                 else:
-                    # If it's already a batch, just move to device
+                    data, labels = batch
+
+                # handle different label formats
+                if isinstance(labels, tuple):
+                    labels = labels[0]
+
+                # move data to device
+                data = data.to(self.device)
+                if isinstance(labels, torch.Tensor):
                     labels = labels.to(self.device)
-
-                if self.criterion.__class__.__name__ in ['BCELoss', 'BCEWithLogitsLoss']:
-                    labels = labels.view(-1, 1)
-
-                start_time = time.perf_counter()
+                elif isinstance(labels, (list, np.ndarray)):
+                    labels = torch.tensor(labels).to(self.device)
 
                 # forward pass
-                self.optimizer.zero_grad()
-                outputs = self.model(inputs)
-
-                loss = self.criterion(outputs, labels)
-
-                # backward pass
-                loss.backward()
-                # gradient clipping
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                self.optimizer.step()
-
-                # measure elapsed time
-                elapsed_time = time.perf_counter() - start_time
-                total_time += elapsed_time
-
-                # accumulate loss and accuracy
-                epoch_loss += loss.item() * batch_size
-
-                # calculate accuracy
-                if outputs.shape[1] > 1: # multi-class
-                    predicted = torch.argmax(outputs, dim=1)
-                if isinstance(self.criterion, nn.BCEWithLogitsLoss):
-                    predicted = (outputs > 0).long()
+                outputs = self.model(data)
+                if outputs.ndim == 2 and outputs.size(1) > 1:
+                    # multi-class
+                    preds = torch.argmax(outputs, dim=1)
                 else:
-                    predicted = (outputs > 0.5).long()
+                    # binary
+                    if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+                        preds = (outputs > 0).long().squeeze()
+                    else:
+                        preds = (outputs > 0.5).long().squeeze()
 
-                correct = (predicted == labels).sum().item()
-                epoch_accuracy += correct
 
-            # calculate averages
-            epoch_loss /= total_samples
-            epoch_accuracy /= total_samples
-            time_per_sample = total_time / total_samples
+                # collect all predictions and labels
+                all_preds.extend(preds.cpu().nupmy())
+                all_labels.extend(labels.cpu().numpy())
 
-            # Synchronize metrics across processes in distributed training
-            if self.distributed and torch.distributed.is_initialized():
-                # Create tensors for each metric
-                metrics = torch.tensor([
-                            epoch_loss * total_samples,
-                            epoch_accuracy * total_samples,
-                            total_time,
-                            total_samples
-                        ], device=self.device)
+        # convert to numpy arrays
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+
+        # get class names if available
+        class_names = None
+        if self.label_mapper is not None:
+            class_names = [list(self.label_mapper['label_to_idx'].keys())]
+
+        # plot confusion matrix
+        cm = confusion_matrix(all_labels, all_preds)
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+                    xticklabels=class_names, yticklabels=class_names)
+        plt.xlabel("Predicted")
+        plt.ylabel("True")
+        plt.title(f"Confusion Matrix ({mode})")
+
+        # save figure
+        epoch_str = f"_epoch{epoch}" if epoch is not None else ""
+        plt.savefig(os.path.join(self.save_path, f"confusion_matrix{mode}{epoch_str}.png"))
+        plt.close()
+
+        # generate and save classification report
+        report = classification_report(all_labels, all_preds, output_dict=True)
+        report_df = pd.DataFrame(report).transpose()
+
+        # replace indices with class names if available
+        if class_names is not None:
+            # create a mapping dictionary from indices to class names
+            index_to_name = {}
+            for i, name in enumerate(class_names):
+                index_to_name[str(i)] = name
+
+            # replace indices with class names
+            new_index = []
+            for idx in report_df.index:
+                if idx in index_to_name:
+                    new_index.append(index_to_name[idx])
+                else:
+                    new_index.append(idx)
                 
-                # All-reduce to compute mean across processes
-                torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
+            report_df.index = new_index
+
+        # save report
+        report_df.to_csv(os.path.join(self.save_path, f"classification_report_{mode}{epoch_str}.csv"))
+
+        return report_df
+    
+    def calculate_metrics(self, data_loader, epoch=None):
+        """
+        Calculate overall performance metrics, including weighted F1 score.
+
+        Args:
+            data_loader: Dataloader for evaluation
+            epoch: Current epoch (optional)
+
+        Returns:
+            Tuple of (weighted_f1_score, per_class_f1_scores)
+        """
+        # set model to evaluation mode
+        self.model.eval()
+
+        # initialize lists to store predictions and ground_truth
+        all_preds = []
+        all_labels = []
+
+        # no gradient during evaluation
+        with torch.no_grad():
+            for batch in self.data_loader:
+                # get inputs and move to device
+                if isinstance(batch, (list, tuple)) and len(batch) == 2:
+                    inputs, labels = batch
+                else:
+                    inputs = batch["input"]
+                    labels = batch["label"]
+
+                # skip empty batches
+                if inputs.size(0):
+                    continue
+
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
+
+                # forward pass
+                outputs = self.model(inputs)
+                if outputs.ndim == 2 and outputs.size(1) > 1:
+                    # multi-class
+                    preds = torch.argmax(outputs, dim=1)
+                else:
+                    # binary
+                    if isinstance(self.criterion, nn.BCEWithLogitsLoss):
+                        preds = (outputs > 0).long().squeeze()
+                    else:
+                        preds = (outputs > 0.5).long().squeeze()
                 
-                # Get world size for averaging
-                world_size = torch.distributed.get_world_size()
-                metrics /= world_size
-                
-                # Extract metrics
-                epoch_loss = metrics[0] / metrics[3]
-                epoch_accuracy = metrics[1] / metrics[3]
-                time_per_sample = metrics[2] / metrics[3]
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        # convert to numpy arrays
+        all_preds = np.array(all_preds)
+        all_labels = np.array(all_labels)
+
+        # validate data before calculating metrics
+        if len(all_preds) == 0 or len(all_labels) == 0:
+            print("Warning: Empty prediction or target arrays, skipping F1 calculation.")
+            return 0.0, pd.DataFrame()
         
-            return epoch_loss, epoch_accuracy, time_per_sample
+        if len(all_preds) != len(all_labels):
+            print(f"Warning: Prediction and Label array lengths don't match: {len(all_preds)} vs {len(all_labels)}")
+            return 0.0, pd.DataFrame()
+        
+        # print some debug information
+        print(f"Predictions shape: {all_preds.shape}, unique values: {np.unique(all_preds)}")
+        print(f"Labels shape: {all_labels.shape}, unique values: {np.unique(all_labels)}")
 
+        # calculate weighted f1 score
+        from sklearn.metrics import f1_score, classification_report
+        weighted_f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+
+        # calculate per-class f1 scores
+        per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
+
+        # get detailed classification report
+        report = classification_report(all_labels, all_preds, output_dict=True, zero_division=0)
+
+        # save the report to a CSV file if epoch is None (final evaluation)
+        if epoch is None and hasattr(self, 'save_path'):
+            # convert report to DataFrame
+            report_df = pd.DataFrame(report).transpose()
+            
+            # determine split name from data_loader (assuming it's in the dataloader's dataset attributes)
+            split_name = getattr(data_loader.dataset, 'split', 'unknown')
+            
+            # save to CSV
+            report_path = os.path.join(self.save_path, f'classification_report_{split_name}.csv')
+            report_df.to_csv(report_path)
+            print(f"Classification report saved to {report_path}")
+            
+            return weighted_f1, report_df
+        
+        return weighted_f1, pd.DataFrame(report).transpose()
+    
