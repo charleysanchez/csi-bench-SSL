@@ -18,6 +18,7 @@ import hashlib
 import time
 import matplotlib.pyplot as plt
 import warnings
+import yaml
 
 # Mute sklearn warnings about precision/recall being ill-defined
 from sklearn.exceptions import UndefinedMetricWarning
@@ -195,5 +196,352 @@ def main(args=None):
     print(f"Using device: {device}")
 
     # check for available test splits in the dataset
+    task_dir = os.path.join(args.data_dir, args.task)
+    splits_dir = os.path.join(task_dir, "splits")
+    available_test_splits = []
+    if os.path.exists(splits_dir):
+        for filename in os.listdir(splits_dir):
+            if filename.endswith(".json") and filename.startswith("test_"):
+                fn, _ = os.path.splitext(filename)
+                available_test_splits.append(fn)
+
+    print(f"Available test splits: {available_test_splits}")
+
+    # determine which test splits to use
+    if args.test_splits == "all":
+        test_splits = available_test_splits
+    elif args.test_splits is not None:
+        test_splits = args.test_splits.split(",")
+        # validate that the requested splits exist
+        for split in test_splits:
+            if split not in available_test_splits and split != "test_id":
+                print(f"Warning: Requested test split '{split}' not found. Available splits: {available_test_splits}")
+    else:
+        # default to test_id (in-distribution test)
+        test_splits = ["test_id"]
+
+    print(f"Using test splits: {test_splits}")
+
+    if args.no_pin_memory:
+        args.pin_memory = False
+
+    # load data
+    print(f"Loading data from {args.data_dir} for task {args.task}...")
+    data = get_loaders(
+        root=args.data_dir,
+        task=args.task,
+        batch_size=args.batch_size,
+        file_format=args.file_format,
+        data_key=args.data_key,
+        num_workers=args.num_workers,
+        test_splits=test_splits,
+        pin_memory=args.pin_memory,
+        debug=False,
+    )
+
+    # extract data from the returned dictionary
+    loaders = data["loaders"]
+    num_classes = data["num_classes"]
+    label_mapper = data["label_mapper"]
+
+    # get training and validation loaders
+    train_loader = loaders["train"]
+    val_loader = loaders["val"]
+
+    if val_loader is None:
+        print("Warning: no validation data found. Using training data for validation.")
+        val_loader = train_loader
+
+    # countunique labels in the dataset
+    all_labels = []
+    dataset = train_loader.dataset
+    print(f"Detected {num_classes} classes in the dataset.")
+
+    # get test loaders
+    test_loaders = {k: v for k, v in loaders.items() if k.startswith("test")}
+    if not test_loaders:
+        print("Warning: No test splits found in the dataset. Check split names and dataset structure.")
+    else:
+        print(f"Loaded {len(test_loaders)} test splits: {list(test_loaders.keys())}")
+
+    # prepare model
+    print(f"Creating {args.model.upper()} model...")
+    ModelClass = MODEL_TYPES[args.model]
+
+    model_kwargs = {"num_classes": num_classes}
+
+    # add model-specific parameters
+    if args.model in ["mlp", "vit", "pathtst", "timeformer1d"]:
+        model_kwargs.update({"win_len": args.win_len, "feature_size": args.feature_size})
+
+    # ResNet18 specific parameters:
+    if args.model == "resnet18":
+        model_kwargs.update({'in_channels': args.in_channels})
     
+    # LSTM specific parameters
+    if args.model == 'lstm':
+        model_kwargs.update({'feature_size': args.feature_size})
+    
+    # Transformer specific parameters
+    if args.model == 'transformer':
+        model_kwargs.update({
+            'feature_size': args.feature_size,
+            'd_model': args.d_model,
+            'dropout': args.dropout
+        })
+    
+    # ViT specific parameters
+    if args.model == 'vit':
+        model_kwargs.update({
+            'emb_dim': args.emb_dim,
+            'dropout': args.dropout
+        })
+    
+    # PatchTST specific parameters
+    if args.model == 'patchtst':
+        model_kwargs.update({
+            'patch_len': args.patch_len,
+            'stride': args.stride,
+            'emb_dim': args.emb_dim, 
+            'pool': args.pool,
+            'head_dropout': args.head_dropout,
+            'depth': args.depth,
+            'num_heads': args.num_heads,
+            'dropout': args.dropout
+        })
+    
+    # TimesFormer-1D specific parameters
+    if args.model == 'timesformer1d':
+        model_kwargs.update({
+            'patch_size': args.patch_size,
+            'emb_dim': args.emb_dim,
+            'depth': args.depth,
+            'num_heads': args.num_heads,
+            'attn_dropout': args.attn_dropout,
+            'head_dropout': args.head_dropout,
+            'mlp_ratio': args.mlp_ratio,
+            'dropout': args.dropout
+        })
+    
+    # initialize model
+    model = ModelClass(**model_kwargs)
+    model = model.to(device)
+
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
+
+    # setup optimizer and loss function
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay
+    )
+
+    criterion = nn.CrossEntropyLoss()
+
+    # create config dictionary for saving
+    config = {
+        'model': {
+            'model_name': args.model,
+            'task': args.task_name,
+        },
+        'training': {
+            'num_classes': num_classes,
+            'batch_size': args.batch_size,
+            'learning_rate': args.learning_rate,
+            'weight_decay': args.weight_decay,
+            'epochs': args.epochs,
+            'warmup_epochs': args.warmup_epochs,
+            'patience': args.patience,
+            'win_len': args.win_len,
+            'feature_size': args.feature_size,
+        },
+        "testing": {
+            'test_splits': test_splits
+        }
+    }
+
+    # save configuration
+    config_path = os.path.join(results_dir, f"{args.model}_{args.task}_config.yaml")
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, sort_key=False)
+        print(f"Successfully saved configuration to {os.path.abspath(config_path)}")
+
+    # create TaskTrainer
+    trainer = TaskTrainer(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        test_loader=test_loaders,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        save_path=checkpoint_dir,
+        num_classes=num_classes,
+        config=config,
+        label_mapper=label_mapper
+    )
+
+    # train model with early stopping
+    model, training_results = trainer.train()
+    best_epoch = training_results["best_epoch"]
+    history = training_results["training_dataframe"]
+
+    # evaluate on test dataset
+    print("\nEvaluating on test splits:")
+    all_results = {}
+    for key, loader in test_loaders.items():
+        print(f"Evaluating on {key} split:")
+        loss, accuracy = trainer.evaluate(loader)
+        f1_score, _ = trainer.calculate_metrics(loader)
+
+        metrics = {
+            "loss": loss,
+            "accuracy": accuracy,
+            "f1_score": f1_score
+        }
+        all_results[key] = metrics
+        print(f"{key} accuracy: {metrics['accuracy']:.4f}, F1-score: {metrics['f1_score']:.4f}")
+
+        # generate confusion matrix
+        print(f"Generating confusion matrix for {key} split...")
+        confusion_path = os.path.join(results_dir, f"{args.model}_{args.task}_{key}_confusion.png")
+        trainer.plot_confusion_matrix(data_loader=loader, mode=key)
+
+    # create a summary table with all test results
+    summary_table = []
+    for split_name, metrics in all_results.items():
+        row = {
+            'Split': split_name,
+            'Accuracy': f"{metrics['accuracy']:.4f}",
+            'F1-Score': f"{metrics['f1_score']:.4f}"
+        }
+        summary_table.append(row)
+
+    # print summary table
+    print("\nTest Results Summary:")
+    print(f"{'Split':<25} {'Accuracy':<15} {'F1-Score':<15}")
+    print('-' * 55)
+    for row in summary_table:
+        print(f"{row['Split']:<25} {row['Accuracy']:<15} {row['F1-Score']:<15}")
+    
+    # save test results
+    results_file = os.path.join(results_dir, f"{args.model}_{args.task}_results.json")
+
+    # some objects in the metrics might not be JSON serializable, so we need to convert them
+    def convert_to_json_serializable(obj):
+        if isinstance(obj, (np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+    
+    # process all keys and values in all_results
+    for key in all_results:
+        all_results[key] = {k: convert_to_json_serializable(v) for k, v in all_results[key].items()}
+    
+    with open(results_file, 'w') as f:
+        json.dump(all_results, f, indent=4)
+    
+    # save summary that includes training history, best epoch
+    summary = {
+        'best_epoch': best_epoch,
+        'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
+        'best_val_accuracy': float(history.iloc[best_epoch-1]['Val Accuracy']),
+        'experiment_id': experiment_id,
+        'experiment_completed': True
+    }
+
+    # add test results to summary
+    for split_name, metrics in all_results.items():
+        summary[f'{split_name}_accuracy'] = metrics['accuracy']
+        summary[f'{split_name}_f1_score'] = metrics['f1_score']
+    
+    summary_file = os.path.join(results_dir, f"{args.model}_{args.task_name}_summary.json")
+    with open(summary_file, 'w') as f:
+        json.dump(summary, f, indent=4)
+    
+    # Save training history
+    history_file = os.path.join(results_dir, f"{args.model}_{args.task_name}_train_history.csv")
+    history.to_csv(history_file, index=False)
+    
+    print(f"\nTraining and evaluation completed.")
+    print(f"Best model from epoch {best_epoch}, saved to {checkpoint_dir}")
+    print(f"Results saved to {results_dir}")
+
+    # Check if this is the best model for the task so far
+    if not is_sagemaker:
+        # Update best_performance.json if performance improved
+        best_performance_path = os.path.join(model_level_dir, "best_performance.json")
+        
+        try:
+            # Get current validation accuracy
+            val_accuracy = float(history.iloc[best_epoch-1]['Val Accuracy'])
             
+            # Create dictionaries for test accuracies and F1 scores
+            test_accuracies = {}
+            test_f1_scores = {}
+            for split_name, metrics in all_results.items():
+                test_accuracies[split_name] = metrics['accuracy']
+                test_f1_scores[split_name] = metrics['f1_score']
+            
+            # Load current best performance 
+            if os.path.exists(best_performance_path):
+                with open(best_performance_path, 'r') as f:
+                    best_performance = json.load(f)
+                
+                # Get current best validation accuracy
+                current_best_val = best_performance.get('best_val_accuracy', 0.0)
+                
+                # Compare using validation accuracy
+                if val_accuracy > current_best_val:
+                    print(f"New best model! Validation accuracy: {val_accuracy:.4f} (previous best: {current_best_val:.4f})")
+                    
+                    # Create updated best performance
+                    updated_performance = {
+                        'best_val_accuracy': val_accuracy,
+                        'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
+                        'best_experiment_id': experiment_id,
+                        'best_experiment_params': config,
+                        'best_test_accuracies': test_accuracies,
+                        'best_test_f1_scores': test_f1_scores,
+                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    
+                    # Save updated best performance
+                    with open(best_performance_path, 'w') as f:
+                        json.dump(updated_performance, f, indent=4)
+                else:
+                    print(f"Not the best model. Current validation accuracy: {val_accuracy:.4f} (best: {current_best_val:.4f})")
+            else:
+                # First time creating the file
+                print(f"Creating initial best performance record with validation accuracy: {val_accuracy:.4f}")
+                
+                initial_performance = {
+                    'best_val_accuracy': val_accuracy,
+                    'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
+                    'best_experiment_id': experiment_id,
+                    'best_experiment_params': config,
+                    'best_test_accuracies': test_accuracies,
+                    'best_test_f1_scores': test_f1_scores,
+                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                # Create directory if needed
+                os.makedirs(os.path.dirname(best_performance_path), exist_ok=True)
+                
+                # Save initial best performance
+                with open(best_performance_path, 'w') as f:
+                    json.dump(initial_performance, f, indent=4)
+        except Exception as e:
+            print(f"Warning: Failed to update best_performance.json: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    return summary, all_results, model
+
+if __name__ == '__main__':
+    import math  # Import math here for the scheduler function
+    main()
