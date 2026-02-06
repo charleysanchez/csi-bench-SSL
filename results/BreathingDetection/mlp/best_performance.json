@@ -1,0 +1,43 @@
+{
+    "best_val_accuracy": 0.985330399413216,
+    "best_val_loss": 0.11712451588555617,
+    "best_experiment_id": "params_50cf8fc4fa",
+    "best_experiment_params": {
+        "model": {
+            "model_name": "mlp",
+            "task": "BreathingDetection"
+        },
+        "training": {
+            "num_classes": 2,
+            "batch_size": 32,
+            "learning_rate": 0.001,
+            "weight_decay": 1e-05,
+            "epochs": 30,
+            "warmup_epochs": 5,
+            "patience": 15,
+            "win_len": 500,
+            "feature_size": 232
+        },
+        "testing": {
+            "test_splits": [
+                "test_easy_id",
+                "test_medium_id",
+                "test_hard_id",
+                "test_id"
+            ]
+        }
+    },
+    "best_test_accuracies": {
+        "test_easy_id": 0.9888810448288033,
+        "test_medium_id": 0.9753612887941246,
+        "test_hard_id": 0.9564453125,
+        "test": 0.9740121276737522
+    },
+    "best_test_f1_scores": {
+        "test_easy_id": 0.9888834476244931,
+        "test_medium_id": 0.9753552037084997,
+        "test_hard_id": 0.956462838834948,
+        "test": 0.9739909261976794
+    },
+    "timestamp": "2026-02-05 18:01:46"
+}

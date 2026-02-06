@@ -674,7 +674,7 @@ class TaskTrainer(BaseTrainer):
                     labels = batch["label"]
 
                 # skip empty batches
-                if inputs.size(0) == 0:
+                if inputs.shape[0] == 0:
                     continue
 
                 inputs = inputs.to(self.device)

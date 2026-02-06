@@ -169,7 +169,7 @@ def main(args=None):
 
     # use specified directories for local environment with task/model/experiment structure
     # directory structure: save_dir/task/model/experiment_id
-    results_dir = os.path.join(args.output, args.task, args.model, experiment_id)
+    results_dir = os.path.join(args.output_dir, args.task, args.model, experiment_id)
     os.makedirs(results_dir, exist_ok=True)
     # create checkpoints directory too
     checkpoint_dir = os.path.join(args.save_dir, args.task, args.model, experiment_id)
@@ -177,7 +177,7 @@ def main(args=None):
 
     # create best_performance.json file at model level if it doesn't exist
     model_level_dir = os.path.join(args.output_dir, args.task, args.model)
-    best_performance_path = os.path.join(model_level_dir, "best_perfomance.json")
+    best_performance_path = os.path.join(model_level_dir, "best_performance.json")
     if not os.path.exists(best_performance_path):
         with open(best_performance_path, "w") as f:
             json.dump({
@@ -222,6 +222,18 @@ def main(args=None):
 
     print(f"Using test splits: {test_splits}")
 
+    # add handling for None values to prevent dataloader errors
+    def custom_collate_fn(batch):
+        # filter out None samples
+        batch = [item for item in batch if item is not None]
+        
+        # if no samples remain after filtering, return empty tensors
+        if len(batch) == 0:
+            return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0, dtype=torch.long)
+        
+        # use default collate function for the filtered batch
+        return torch.utils.data.dataloader.default_collate(batch)
+
     if args.no_pin_memory:
         args.pin_memory = False
 
@@ -236,6 +248,7 @@ def main(args=None):
         num_workers=args.num_workers,
         test_splits=test_splits,
         pin_memory=args.pin_memory,
+        collate_fn=custom_collate_fn,
         debug=False,
     )
 
@@ -271,7 +284,7 @@ def main(args=None):
     model_kwargs = {"num_classes": num_classes}
 
     # add model-specific parameters
-    if args.model in ["mlp", "vit", "pathtst", "timeformer1d"]:
+    if args.model in ["mlp", "vit", "patchtst", "timesformer1d"]:
         model_kwargs.update({"win_len": args.win_len, "feature_size": args.feature_size})
 
     # ResNet18 specific parameters:
@@ -342,7 +355,7 @@ def main(args=None):
     config = {
         'model': {
             'model_name': args.model,
-            'task': args.task_name,
+            'task': args.task,
         },
         'training': {
             'num_classes': num_classes,
@@ -363,7 +376,7 @@ def main(args=None):
     # save configuration
     config_path = os.path.join(results_dir, f"{args.model}_{args.task}_config.yaml")
     with open(config_path, "w") as f:
-        yaml.dump(config, f, sort_key=False)
+        yaml.dump(config, f, sort_keys=False)
         print(f"Successfully saved configuration to {os.path.abspath(config_path)}")
 
     # create TaskTrainer
@@ -459,67 +472,48 @@ def main(args=None):
         summary[f'{split_name}_accuracy'] = metrics['accuracy']
         summary[f'{split_name}_f1_score'] = metrics['f1_score']
     
-    summary_file = os.path.join(results_dir, f"{args.model}_{args.task_name}_summary.json")
+    summary_file = os.path.join(results_dir, f"{args.model}_{args.task}_summary.json")
+    summary = {k: convert_to_json_serializable(v) for k, v in summary.items()}
     with open(summary_file, 'w') as f:
         json.dump(summary, f, indent=4)
     
     # Save training history
-    history_file = os.path.join(results_dir, f"{args.model}_{args.task_name}_train_history.csv")
+    history_file = os.path.join(results_dir, f"{args.model}_{args.task}_train_history.csv")
     history.to_csv(history_file, index=False)
     
-    print(f"\nTraining and evaluation completed.")
+    print("\nTraining and evaluation completed.")
     print(f"Best model from epoch {best_epoch}, saved to {checkpoint_dir}")
     print(f"Results saved to {results_dir}")
 
     # Check if this is the best model for the task so far
-    if not is_sagemaker:
-        # Update best_performance.json if performance improved
-        best_performance_path = os.path.join(model_level_dir, "best_performance.json")
+    # Update best_performance.json if performance improved
+    best_performance_path = os.path.join(model_level_dir, "best_performance.json")
+    
+    try:
+        # Get current validation accuracy
+        val_accuracy = float(history.iloc[best_epoch-1]['Val Accuracy'])
         
-        try:
-            # Get current validation accuracy
-            val_accuracy = float(history.iloc[best_epoch-1]['Val Accuracy'])
+        # Create dictionaries for test accuracies and F1 scores
+        test_accuracies = {}
+        test_f1_scores = {}
+        for split_name, metrics in all_results.items():
+            test_accuracies[split_name] = metrics['accuracy']
+            test_f1_scores[split_name] = metrics['f1_score']
+        
+        # Load current best performance 
+        if os.path.exists(best_performance_path):
+            with open(best_performance_path, 'r') as f:
+                best_performance = json.load(f)
             
-            # Create dictionaries for test accuracies and F1 scores
-            test_accuracies = {}
-            test_f1_scores = {}
-            for split_name, metrics in all_results.items():
-                test_accuracies[split_name] = metrics['accuracy']
-                test_f1_scores[split_name] = metrics['f1_score']
+            # Get current best validation accuracy
+            current_best_val = best_performance.get('best_val_accuracy', 0.0)
             
-            # Load current best performance 
-            if os.path.exists(best_performance_path):
-                with open(best_performance_path, 'r') as f:
-                    best_performance = json.load(f)
+            # Compare using validation accuracy
+            if val_accuracy > current_best_val:
+                print(f"New best model! Validation accuracy: {val_accuracy:.4f} (previous best: {current_best_val:.4f})")
                 
-                # Get current best validation accuracy
-                current_best_val = best_performance.get('best_val_accuracy', 0.0)
-                
-                # Compare using validation accuracy
-                if val_accuracy > current_best_val:
-                    print(f"New best model! Validation accuracy: {val_accuracy:.4f} (previous best: {current_best_val:.4f})")
-                    
-                    # Create updated best performance
-                    updated_performance = {
-                        'best_val_accuracy': val_accuracy,
-                        'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
-                        'best_experiment_id': experiment_id,
-                        'best_experiment_params': config,
-                        'best_test_accuracies': test_accuracies,
-                        'best_test_f1_scores': test_f1_scores,
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                    
-                    # Save updated best performance
-                    with open(best_performance_path, 'w') as f:
-                        json.dump(updated_performance, f, indent=4)
-                else:
-                    print(f"Not the best model. Current validation accuracy: {val_accuracy:.4f} (best: {current_best_val:.4f})")
-            else:
-                # First time creating the file
-                print(f"Creating initial best performance record with validation accuracy: {val_accuracy:.4f}")
-                
-                initial_performance = {
+                # Create updated best performance
+                updated_performance = {
                     'best_val_accuracy': val_accuracy,
                     'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
                     'best_experiment_id': experiment_id,
@@ -529,16 +523,35 @@ def main(args=None):
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
                 }
                 
-                # Create directory if needed
-                os.makedirs(os.path.dirname(best_performance_path), exist_ok=True)
-                
-                # Save initial best performance
+                # Save updated best performance
                 with open(best_performance_path, 'w') as f:
-                    json.dump(initial_performance, f, indent=4)
-        except Exception as e:
-            print(f"Warning: Failed to update best_performance.json: {e}")
-            import traceback
-            traceback.print_exc()
+                    json.dump(updated_performance, f, indent=4)
+            else:
+                print(f"Not the best model. Current validation accuracy: {val_accuracy:.4f} (best: {current_best_val:.4f})")
+        else:
+            # First time creating the file
+            print(f"Creating initial best performance record with validation accuracy: {val_accuracy:.4f}")
+            
+            initial_performance = {
+                'best_val_accuracy': val_accuracy,
+                'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
+                'best_experiment_id': experiment_id,
+                'best_experiment_params': config,
+                'best_test_accuracies': test_accuracies,
+                'best_test_f1_scores': test_f1_scores,
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Create directory if needed
+            os.makedirs(os.path.dirname(best_performance_path), exist_ok=True)
+            
+            # Save initial best performance
+            with open(best_performance_path, 'w') as f:
+                json.dump(initial_performance, f, indent=4)
+    except Exception as e:
+        print(f"Warning: Failed to update best_performance.json: {e}")
+        import traceback
+        traceback.print_exc()
     
     return summary, all_results, model
 

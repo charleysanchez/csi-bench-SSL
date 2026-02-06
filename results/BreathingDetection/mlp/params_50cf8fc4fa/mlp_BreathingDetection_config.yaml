@@ -1,0 +1,19 @@
+model:
+  model_name: mlp
+  task: BreathingDetection
+training:
+  num_classes: 2
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 1.0e-05
+  epochs: 30
+  warmup_epochs: 5
+  patience: 15
+  win_len: 500
+  feature_size: 232
+testing:
+  test_splits:
+  - test_easy_id
+  - test_medium_id
+  - test_hard_id
+  - test_id
