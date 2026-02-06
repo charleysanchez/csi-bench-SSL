@@ -1,0 +1,43 @@
+{
+    "best_val_accuracy": 0.9651621384750219,
+    "best_val_loss": 0.1062531795336727,
+    "best_experiment_id": "params_ab4b566d75",
+    "best_experiment_params": {
+        "model": {
+            "model_name": "mlp",
+            "task": "MotionSourceRecognition"
+        },
+        "training": {
+            "num_classes": 2,
+            "batch_size": 32,
+            "learning_rate": 0.001,
+            "weight_decay": 1e-05,
+            "epochs": 50,
+            "warmup_epochs": 5,
+            "patience": 15,
+            "win_len": 500,
+            "feature_size": 232
+        },
+        "testing": {
+            "test_splits": [
+                "test_medium",
+                "test_easy",
+                "test_hard",
+                "test_id"
+            ]
+        }
+    },
+    "best_test_accuracies": {
+        "test_medium": 0.9586394123283296,
+        "test_easy": 0.9861271676300578,
+        "test_hard": 0.9540918163672655,
+        "test": 0.9602453181469719
+    },
+    "best_test_f1_scores": {
+        "test_medium": 0.9583890862807762,
+        "test_easy": 0.9861271676300578,
+        "test_hard": 0.9541857868121634,
+        "test": 0.9600853665681871
+    },
+    "timestamp": "2026-02-06 14:29:33"
+}

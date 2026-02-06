@@ -160,8 +160,9 @@ class TaskTrainer(BaseTrainer):
             # number of epochs and patience from config
             # handle both object attributes and dictionary keys
             if isinstance(self.config, dict):
-                epochs = self.config.get("epochs", 30)
-                patience = self.config.get("epochs", 15)
+                self.training_config = self.config["training"]
+                epochs = self.training_config.get("epochs", 30)
+                patience = self.training_config.get("epochs", 15)
             else:
                 epochs = getattr(self.config, "epochs", 30)
                 patience = getattr(self.config, "patience", 15)
