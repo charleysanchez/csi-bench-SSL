@@ -21,6 +21,7 @@ provides an implicit clustering objective via the codebook commitment loss.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import f1_score
 from typing import Any
 
 from .base import MultiPassTask, PretextBatch
@@ -261,7 +262,7 @@ class VQCPC(MultiPassTask):
             "cpc_loss": cpc_loss.item(),
             "commitment_loss": commitment_loss.item(),
             "vq_perplexity": perplexity.item(),
-            "cpc_accuracy": correct / max(total, 1),
+            "cpc_f1": f1_score(labels.cpu().numpy(), logits.argmax(1).cpu().numpy(), average='macro')
         })
 
         return total_loss

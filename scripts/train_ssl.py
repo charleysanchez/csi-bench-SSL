@@ -335,7 +335,7 @@ def main():
         print(f"Epoch {epoch+1}/{args.epochs} ({elapsed:.1f}s): "
               f"Train Loss: {train_summary['train_loss']:.4f} | "
               f"Val Loss: {val_summary['val_loss']:.4f} | "
-              f"Val Acuracy: {val_summary.get('val_cpc_accuracy', 0.0):.4f}")
+              f"Val F1: {val_summary.get('cpc_f1', 0.0):.4f}")
 
         # ── Checkpoint ────────────────────────────────────────────────────────
         is_best = val_summary["val_loss"] < best_val_loss
