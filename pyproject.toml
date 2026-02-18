@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [tool.pixi.workspace]
-channels = ["conda-forge", "pytorch", "nvidia"]
+channels = ["pytorch", "nvidia", "conda-forge"]
 platforms = [ "linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
