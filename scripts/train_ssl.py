@@ -195,11 +195,10 @@ def main():
     print(f"Save dir: {args.save_dir}")
     os.makedirs(args.save_dir, exist_ok=True)
 
-    import ast
     train_filter_dict = None
     if args.train_filter:
         try:
-            train_filter_dict = ast.literal_eval(args.train_filter)
+            train_filter_dict = json.loads(args.train_filter)
             print(f"Using train filter: {train_filter_dict}")
         except Exception as e:
             print(f"Error parsing train_filter: {e}")
@@ -207,7 +206,7 @@ def main():
     test_filter_dict = None
     if args.test_filter:
         try:
-            test_filter_dict = ast.literal_eval(args.test_filter)
+            test_filter_dict = json.loads(args.test_filter)
             print(f"Using test filter: {test_filter_dict}")
         except Exception as e:
             print(f"Error parsing test_filter: {e}")
@@ -330,12 +329,11 @@ def main():
 
         elapsed = time.time() - t0
 
-        
         # Compact summary
         print(f"Epoch {epoch+1}/{args.epochs} ({elapsed:.1f}s): "
               f"Train Loss: {train_summary['train_loss']:.4f} | "
               f"Val Loss: {val_summary['val_loss']:.4f} | "
-              f"Val F1: {val_summary.get('cpc_f1', 0.0):.4f}")
+              f"Val F1: {val_summary.get('val_cpc_f1', 0.0):.4f}")
 
         # ── Checkpoint ────────────────────────────────────────────────────────
         is_best = val_summary["val_loss"] < best_val_loss
