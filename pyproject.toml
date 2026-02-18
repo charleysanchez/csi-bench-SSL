@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [tool.pixi.workspace]
-channels = ["conda-forge"]
+channels = ["conda-forge", "pytorch", "nvidia"]
 platforms = [ "linux-64", "osx-arm64"]
 
 [tool.pixi.pypi-dependencies]
@@ -27,12 +27,11 @@ nomkl = ">=1.0,<2"
 [tool.pixi.dependencies]
 tensorboard = ">=2.20.0,<3"
 
-[tool.pixi.feature.cuda118.dependencies]
+[tool.pixi.feature.cuda118.target.linux-64.dependencies]
 pytorch-cuda = "11.8.*"
 
 [tool.pixi.feature.cuda118.system-requirements]
 cuda = "11.8"
 
 [tool.pixi.environments]
-default = ["tensorboard"] 
 legacy-gpu = { features = ["cuda118"], solve-group = "default" }
