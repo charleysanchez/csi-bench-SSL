@@ -18,7 +18,7 @@ csi_bench_ssl = { path = ".", editable = true }
 [tool.pixi.tasks]
 
 [tool.pixi.target.linux-64.pypi-dependencies]
-cuda-bindings = ">=11.8,<13"
+cuda-bindings = "==12.9.4"
 triton = "==3.6.0"
 
 [tool.pixi.target.osx-arm64.dependencies]
@@ -26,3 +26,13 @@ nomkl = ">=1.0,<2"
 
 [tool.pixi.dependencies]
 tensorboard = ">=2.20.0,<3"
+
+[tool.pixi.feature.cuda118.dependencies]
+pytorch-cuda = "11.8.*"
+
+[tool.pixi.feature.cuda118.system-requirements]
+cuda = "11.8"
+
+[tool.pixi.environments]
+default = ["tensorboard"] 
+legacy-gpu = { features = ["cuda118"], solve-group = "default" }
