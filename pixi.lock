@@ -436,7 +436,7 @@ packages:
 - pypi: ./
   name: csi-bench-ssl
   version: 0.1.0
-  sha256: 47fff5bb2e16e4a4fbbe8d3341df28930691d1939d0cfebaea8e98a139ba4be4
+  sha256: 07538f10f7f333c2e7eacc3f147977556cffe1901ce0b2c0ffae91ea99e479c8
   requires_dist:
   - numpy>=2.0
   - pandas>=2.0

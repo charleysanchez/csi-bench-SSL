@@ -1,5 +1,6 @@
 import sys
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
 from torch.utils.data import DataLoader
 
@@ -51,8 +52,8 @@ def verify_vqcpc():
         
         B, T, F = 2, 100, 30
         data = torch.randn(B, 1, T, F)
-        
-        batch = (data, torch.zeros(B), [{} for _ in range(B)])
+        metadata = [{'user': f'user_{i%2}'} for i in range(B)]
+        batch = (data, torch.zeros(B), metadata)
         
         outputs = model.training_step(batch, 0)
         

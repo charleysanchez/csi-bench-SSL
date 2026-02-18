@@ -68,7 +68,6 @@ class VectorQuantizer(nn.Module):
         avg_probs = torch.mean(encodings, dim=0)
         perplexity = torch.exp(-torch.sum(avg_probs * torch.log(avg_probs + 1e-10)))
         
-        # return (B, D, T)
         return loss, quantized.permute(0, 2, 1).contiguous(), perplexity, encoding_indices
 
 class VQCPC(PretextTask):
@@ -85,7 +84,7 @@ class VQCPC(PretextTask):
         self.encoder = StridedConvEncoder(self.feature_size, self.hidden_dim, self.hidden_dim)
         self.vq = VectorQuantizer(self.vq_embeddings, self.hidden_dim)
         self.gru = nn.GRU(self.hidden_dim, self.hidden_dim, num_layers=2, batch_first=True)
-        self.W_k = nn.ModuleList([nn.Linear(self.hidden_dim, self.hidden_dim) for _ in range(5)]) # Predict 5 steps
+        self.W_k = nn.ModuleList([nn.Linear(self.hidden_dim, self.hidden_dim) for _ in range(5)])
 
     def get_encoder(self):
         return self.encoder
@@ -94,16 +93,18 @@ class VQCPC(PretextTask):
         return torch.optim.Adam(self.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
 
     def validation_step(self, batch, batch_idx):
-        return {} # Optional
+        return {}
 
     def training_step(self, batch, batch_idx, optimizer_idx=0):
-        # Unpack batch. We expect (data, label, metadata) but only need data.
         if isinstance(batch, (list, tuple)):
             data = batch[0]
+            metadata = batch[2] if len(batch) >= 3 else None
         elif isinstance(batch, dict):
             data = batch['data']
+            metadata = batch.get('metadata', None)
         else:
             data = batch
+            metadata = None
             
         # 1. Encode
         z = self.encoder(data) # (B, D, T')
@@ -123,10 +124,6 @@ class VQCPC(PretextTask):
         seq_len = c.size(1)
         
         for k in range(1, steps + 1):
-            # Transform c_t to allow predicting z_{t+k}
-            # We predict FUTURE z_q from PRESENT c
-            
-            # Prediction: c[:, :-k, :] * W_k -> z_q[:, k:, :]
             if k >= seq_len: break
             
             c_curr = c[:, :-k, :] # (B, L, D)
@@ -161,7 +158,34 @@ class VQCPC(PretextTask):
             pred_t = self.W_k[k-1](c_t) # (B, D)
             z_next = z_q_t[:, t+k, :] # (B, D)
             
-            logits = torch.matmul(pred_t, z_next.T) # (B, B)
+            # Logits: (B, B) where (i, j) is score of predicting z_j from c_i
+            logits = torch.matmul(pred_t, z_next.T) # (B, D) @ (D, B) -> (B, B)
+            
+            # Cross-User Negative Sampling
+            # If metadata is available and has 'user', we mask out negatives from the same user
+            if metadata and isinstance(metadata, (list, tuple)) and len(metadata) > 0 and 'user' in metadata[0]:
+                users = [str(m['user']) for m in metadata]
+                batch_size = len(users)
+                
+                # Create mask: (B, B) where mask[i,j] is True if we should keep the pair (i,j)
+                # We keep (i, j) if i == j (positive) OR user[i] != user[j] (valid negative)
+                # We discard (i, j) if i != j AND user[i] == user[j] (same-user negative)
+                
+                # Using python set/dict for string comparison and torch for broadcasting
+                # This removes numpy dependency
+                unique_users = sorted(list(set(users)))
+                user_to_idx = {u: i for i, u in enumerate(unique_users)}
+                user_indices = torch.tensor([user_to_idx[u] for u in users], device=logits.device)
+                
+                # mask_diff_users: True where users distinct
+                mask_diff_users = (user_indices.unsqueeze(1) != user_indices.unsqueeze(0))
+                
+                # Ensure diagonal is True (positives)
+                mask_diff_users.fill_diagonal_(True)
+                
+                # Apply mask: Set invalid pairs to -inf so Softmax ignores them
+                logits = logits.masked_fill(~mask_diff_users, float('-inf'))
+            
             labels = torch.arange(logits.size(0), device=logits.device)
             total_nce_loss += F.cross_entropy(logits, labels)
             
