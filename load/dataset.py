@@ -55,12 +55,8 @@ class CSIDataset(Dataset):
             else:
                 print(f"Could not find task directory: {task_dir}")
 
-        # define split and metadata paths
-        self.split_path = os.path.join(
-            self.task_dir, "splits", f"{split}.json"
-        )
-        print(f"Using split: {split}")
 
+        # define split and metadata paths
         self.metadata_dir = os.path.join(self.task_dir, "metadata")
         self.metadata_path = os.path.join(
             self.metadata_dir, "sample_metadata.csv"
@@ -69,9 +65,16 @@ class CSIDataset(Dataset):
             self.metadata_dir, "label_mapping.json"
         )
 
-        # load the split.json to create a set of the IDs to use
-        with open(self.split_path, "r") as f:
-            self.split_ids = set(json.load(f))
+        if split == "all_available":
+            print(f"Using all available data (ignoring split files)")
+            self.split_ids = None
+        else:
+            self.split_path = os.path.join(
+                self.task_dir, "splits", f"{split}.json"
+            )
+            print(f"Using split: {split}")
+            with open(self.split_path, "r") as f:
+                self.split_ids = set(json.load(f))
 
         # read in the metadata.csv file
         self.metadata = pd.read_csv(self.metadata_path)
@@ -93,10 +96,19 @@ class CSIDataset(Dataset):
                 self.metadata = self.metadata[self.metadata[col].isin(val)]
             
             self.split_metadata = self.metadata.reset_index(drop=True)
+            
+            if self.split_ids is not None:
+                 self.split_metadata = self.split_metadata[
+                    self.split_metadata["id"].isin(self.split_ids)
+                ].reset_index(drop=True)
+
         else:
-            self.split_metadata = self.metadata[
-                self.metadata["id"].isin(self.split_ids)
-            ].reset_index(drop=True)
+            if self.split_ids is not None:
+                self.split_metadata = self.metadata[
+                    self.metadata["id"].isin(self.split_ids)
+                ].reset_index(drop=True)
+            else:
+                 self.split_metadata = self.metadata.reset_index(drop=True)
 
         # make sure required columns are in the dataset
         if data_column not in self.split_metadata.columns:
