@@ -327,7 +327,18 @@ class TaskTrainer(BaseTrainer):
             leave=False,
         )
 
-        for inputs, labels in loader:
+        for batch in loader:
+            if isinstance(batch, (list, tuple)):
+                if len(batch) >= 2:
+                    inputs = batch[0]
+                    labels = batch[1]
+                else:
+                    raise ValueError(f"Batch must have at least 2 elements, got {len(batch)}")
+            elif isinstance(batch, dict):
+                 inputs = batch["data"]
+                 labels = batch["label"]
+            else:
+                 raise TypeError(f"Unsupported batch type: {type(batch)}")
             # skip empty batches (from custom_collate_fn if all samples were None)
             if inputs.size(0) == 0:
                 continue
@@ -424,7 +435,14 @@ class TaskTrainer(BaseTrainer):
         total_samples = 0
 
         with torch.no_grad():
-            for inputs, labels in data_loader:
+            for batch in data_loader:
+                if isinstance(batch, (list, tuple)):
+                    if len(batch) >= 2:
+                        inputs = batch[0]
+                        labels = batch[1]
+                elif isinstance(batch, dict):
+                     inputs = batch["data"]
+                     labels = batch["label"]
                 # skip empy batches
                 if inputs.size(0) == 0:
                     continue
@@ -561,8 +579,14 @@ class TaskTrainer(BaseTrainer):
                 if isinstance(batch, dict):
                     data = batch["data"]
                     labels = batch["labels"]
+                elif isinstance(batch, (list, tuple)):
+                    if len(batch) >= 2:
+                        data = batch[0]
+                        labels = batch[1]
+                    else:
+                        raise ValueError(f"Batch must have at least 2 elements, got {len(batch)}")
                 else:
-                    data, labels = batch
+                     raise TypeError(f"Unsupported batch type: {type(batch)}")
 
                 # handle different label formats
                 if isinstance(labels, tuple):
@@ -667,12 +691,17 @@ class TaskTrainer(BaseTrainer):
         # no gradient during evaluation
         with torch.no_grad():
             for batch in data_loader:
-                # get inputs and move to device
-                if isinstance(batch, (list, tuple)) and len(batch) == 2:
-                    inputs, labels = batch
-                else:
+                if isinstance(batch, (list, tuple)):
+                    if len(batch) >= 2:
+                        inputs = batch[0]
+                        labels = batch[1]
+                    else:
+                        raise ValueError(f"Batch must have at least 2 elements, got {len(batch)}")
+                elif isinstance(batch, dict):
                     inputs = batch["input"]
                     labels = batch["label"]
+                else:
+                     raise TypeError(f"Unsupported batch type: {type(batch)}")
 
                 # skip empty batches
                 if inputs.shape[0] == 0:

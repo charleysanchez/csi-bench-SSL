@@ -27,6 +27,7 @@ class CSIDataset(Dataset):
         data_key="CSI_amps",
         label_mapper=None,
         task_dir=None,
+        filter_dict=None,
         debug=False,
     ):
         self.root = root
@@ -38,6 +39,7 @@ class CSIDataset(Dataset):
         self.data_column = data_column
         self.label_column = label_column
         self.data_key = data_key
+        self.filter_dict = filter_dict
         self.debug = debug
 
         # if task directory provided then try to use it
@@ -75,9 +77,26 @@ class CSIDataset(Dataset):
         self.metadata = pd.read_csv(self.metadata_path)
 
         # filter metadata for this split
-        self.split_metadata = self.metadata[
-            self.metadata["id"].isin(self.split_ids)
-        ].reset_index(drop=True)
+        if self.filter_dict:
+            print(f"Applying filter: {self.filter_dict}")
+            for col, val in self.filter_dict.items():
+                if col not in self.metadata.columns:
+                    print(f"Warning: Filter column '{col}' not found in metadata. Skipping.")
+                    continue
+                
+                if not isinstance(val, (list, tuple)):
+                    val = [val]
+                
+                val = [str(v) for v in val]
+                self.metadata[col] = self.metadata[col].astype(str)
+                
+                self.metadata = self.metadata[self.metadata[col].isin(val)]
+            
+            self.split_metadata = self.metadata.reset_index(drop=True)
+        else:
+            self.split_metadata = self.metadata[
+                self.metadata["id"].isin(self.split_ids)
+            ].reset_index(drop=True)
 
         # make sure required columns are in the dataset
         if data_column not in self.split_metadata.columns:
@@ -164,7 +183,9 @@ class CSIDataset(Dataset):
 
             label_idx = self.label_mapper["label_to_idx"][label]
 
-            return csi_standardized, label_idx
+            metadata = row.to_dict()
+
+            return csi_standardized, label_idx, metadata
         except Exception as e:
             print(f"Error processing sample {index}: {str(e)}")
             return None

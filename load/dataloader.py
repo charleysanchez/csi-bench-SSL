@@ -23,6 +23,8 @@ def get_loaders(
         distributed=False,
         collate_fn=None,
         pin_memory=True,
+        train_filter=None,
+        val_filter=None,
         debug=False,
 ):
     """
@@ -46,6 +48,8 @@ def get_loaders(
         distributed: Whether to configure data loaders for distributed training
         collate_fn: Custom collate function for DataLoader
         pin_memory: Whether to use pinned memory (set to False for MPS device)
+        train_filter: Dictionary to filter training data (e.g. {'user': ['F01']})
+        val_filter: Dictionary to filter validation data
         debug: Whether to enable debug mode.
         
     Returns:
@@ -101,6 +105,7 @@ def get_loaders(
                 data_key=data_key,
                 label_mapper=label_mapper,
                 task_dir=task_dir,
+                filter_dict=train_filter if split_name == train_split else (val_filter if split_name == val_split else None),
                 debug=debug
             )
             datasets[split_name] = dataset
