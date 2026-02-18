@@ -1,0 +1,14 @@
+numpy>=2.0
+pandas>=2.0
+scipy>=1.10
+scikit-learn
+h5py
+torch>=2.2
+torchvision
+matplotlib
+seaborn
+ipykernel
+ipython
+jupyter_client
+tqdm
+PyYAML
