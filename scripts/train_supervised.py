@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import sys
 
 # Add the project root directory to the Python path
@@ -48,6 +49,15 @@ MODEL_TYPES = {
     'patchtst': PatchTST,
     'timesformer1d': TimesFormer1D
 }
+
+def custom_collate_fn(batch):
+    batch = [item for item in batch if item is not None]
+    
+    if len(batch) == 0:
+        return torch.tensor([]), torch.tensor([]), []
+    
+    output = torch.utils.data.dataloader.default_collate(batch)
+    return output
 
 def main(args=None):
     if args is None:
@@ -137,6 +147,10 @@ def main(args=None):
                             help='Enable pin memory for data loading (not recommended for MPS)')
         parser.add_argument('--no_pin_memory', action='store_true',
                             help='Disable pin memory for data loading (use for MPS devices)')
+        parser.add_argument('--train_filter', type=str, default=None,
+                            help='Filter for training data (format: "key:val1,val2;key2:val3")')
+        parser.add_argument('--val_filter', type=str, default=None,
+                            help='Filter for validation data (format: "key:val1,val2;key2:val3")')
         
         args = parser.parse_args()
 
@@ -196,7 +210,7 @@ def main(args=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using device: {device}")
     if device == "mps":
-        mp.set_start_method('spawn', force=True) 
+        args.num_workers = 0
 
     # check for available test splits in the dataset
     task_dir = os.path.join(args.data_dir, args.task)
@@ -225,20 +239,29 @@ def main(args=None):
 
     print(f"Using test splits: {test_splits}")
 
-    # add handling for None values to prevent dataloader errors
-    def custom_collate_fn(batch):
-        # filter out None samples
-        batch = [item for item in batch if item is not None]
-        
-        # if no samples remain after filtering, return empty tensors
-        if len(batch) == 0:
-            return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0, dtype=torch.long)
-        
-        # use default collate function for the filtered batch
-        return torch.utils.data.dataloader.default_collate(batch)
 
     if args.no_pin_memory:
         args.pin_memory = False
+
+    def parse_filter_string(filter_str):
+        if not filter_str:
+            return None
+        filter_dict = {}
+        pairs = filter_str.split(';')
+        for pair in pairs:
+            if ':' in pair:
+                key, val_str = pair.split(':', 1)
+                vals = val_str.split(',')
+                filter_dict[key.strip()] = [v.strip() for v in vals]
+        return filter_dict
+
+    train_filter_dict = parse_filter_string(args.train_filter)
+    val_filter_dict = parse_filter_string(args.val_filter)
+
+    if train_filter_dict:
+        print(f"Using training filter: {train_filter_dict}")
+    if val_filter_dict:
+        print(f"Using validation filter: {val_filter_dict}")
 
     # load data
     print(f"Loading data from {args.data_dir} for task {args.task}...")
@@ -252,6 +275,8 @@ def main(args=None):
         test_splits=test_splits,
         pin_memory=args.pin_memory,
         collate_fn=custom_collate_fn,
+        train_filter=train_filter_dict,
+        val_filter=val_filter_dict,
         debug=False,
     )
 
@@ -373,6 +398,10 @@ def main(args=None):
         },
         "testing": {
             'test_splits': test_splits
+        },
+        "filters": {
+            'train_filter': args.train_filter,
+            'val_filter': args.val_filter
         }
     }
 
