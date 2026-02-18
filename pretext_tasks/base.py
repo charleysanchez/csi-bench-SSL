@@ -1,78 +1,142 @@
+"""
+Base classes for the pretext task framework.
+"""
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from typing import Any
+
 import torch
 import torch.nn as nn
-from abc import ABC, abstractmethod
 
-class PretextTask(nn.Module, ABC):
+
+@dataclass
+class PretextBatch:
     """
-    Abstract base class for self-supervised learning pretext tasks.
-    
-    All SSL methods (e.g., VQ-CPC, Masked Autoencoding, Contrastive Learning)
-    must implement this interface to be compatible with the generic training script.
+    Standardized container passed between transform() and compute_loss().
+    The training loop only ever sees this type — task-specific details
+    live in `metadata`.
     """
-    
-    def __init__(self, config, device):
+    inputs: torch.Tensor
+    targets: Any = None                          # tensor, dict, list — unconstrained
+    metadata: dict = field(default_factory=dict) # escape hatch for anything extra
+
+
+class PretextTask(ABC, nn.Module):
+    """
+    Abstract base for all pretext tasks.
+
+    Inherits nn.Module so auxiliary parameters (projection heads,
+    codebooks, AR models, etc.) are automatically tracked by the optimizer.
+
+    Subclasses implement ONE of two contracts:
+      - SinglePassTask  → implement compute_loss(model_output, batch)
+      - MultiPassTask   → implement compute_loss_with_model(model, batch)
+    """
+
+    @abstractmethod
+    def transform(self, raw_batch: Any) -> PretextBatch:
+        """
+        Convert a raw dataloader batch into a PretextBatch.
+        Augmentations, masking, view generation, etc. live here.
+        """
+        ...
+
+    def uses_model_directly(self) -> bool:
+        """
+        Return True if this task needs to call the encoder itself
+        (e.g. for multiple forward passes, momentum encoders, etc.)
+        """
+        return False
+
+    def compute_loss(self, model_output: Any, batch: PretextBatch) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement compute_loss() "
+            "or set uses_model_directly()=True and implement compute_loss_with_model()."
+        )
+
+    def compute_loss_with_model(self, model: nn.Module, batch: PretextBatch) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} declared uses_model_directly()=True "
+            "but did not implement compute_loss_with_model()."
+        )
+
+    def forward(self, raw_batch: Any) -> PretextBatch:
+        return self.transform(raw_batch)
+
+
+class SinglePassTask(PretextTask):
+    """
+    Convenience base for tasks where the pipeline handles the forward pass.
+    Implement transform() and compute_loss() only.
+    """
+
+    @abstractmethod
+    def compute_loss(self, model_output: Any, batch: PretextBatch) -> torch.Tensor:
+        ...
+
+
+class MultiPassTask(PretextTask):
+    """
+    Convenience base for tasks that need to call the encoder themselves.
+    Implement transform() and compute_loss_with_model() only.
+    """
+
+    def uses_model_directly(self) -> bool:
+        return True
+
+    @abstractmethod
+    def compute_loss_with_model(self, model: nn.Module, batch: PretextBatch) -> torch.Tensor:
+        ...
+
+
+class MultiTaskWrapper(PretextTask):
+    """
+    Combines multiple pretext tasks with per-task loss weights.
+    Each sub-task's transform is called independently; losses are summed.
+
+    Usage:
+        task = MultiTaskWrapper({
+            "cpc": (cpc_task, 1.0),
+            "rotation": (rotation_task, 0.5),
+        })
+    """
+
+    def __init__(self, tasks: dict[str, tuple["PretextTask", float]]):
         super().__init__()
-        self.config = config
-        self.device = device
+        self.tasks = nn.ModuleDict({k: v[0] for k, v in tasks.items()})
+        self.weights = {k: v[1] for k, v in tasks.items()}
 
-    @abstractmethod
-    def training_step(self, batch, batch_idx, optimizer_idx=0):
-        """
-        Compute the training loss for a batch.
-        
-        Args:
-            batch: The output from the DataLoader. 
-                   Usually a tuple (data, label, metadata) or dictionary.
-                   The task should handle whatever format the dataset returns.
-            batch_idx: The index of the current batch.
-            optimizer_idx: The index of the optimizer to use (for GANs/Adversarial).
-                           Defaults to 0.
-                           
-        Returns:
-            torch.Tensor: The loss value to backpropagate.
-            dict: (Optional) A dictionary of metrics to log (e.g. {'acc': 0.9, 'rec_loss': 0.1})
-                  If returning a dict, the loss must be under the key 'loss'.
-                  If returning a Tensor, it is assumed to be the loss.
-        """
-        pass
+    def transform(self, raw_batch: Any) -> PretextBatch:
+        sub_batches = {name: task.transform(raw_batch) for name, task in self.tasks.items()}
+        # Use first task's inputs as the nominal batch inputs
+        first = next(iter(sub_batches.values()))
+        return PretextBatch(
+            inputs=first.inputs,
+            targets=None,
+            metadata={"sub_batches": sub_batches},
+        )
 
-    @abstractmethod
-    def validation_step(self, batch, batch_idx):
-        """
-        Compute validation metrics for a batch.
-        
-        Args:
-            batch: The output from the DataLoader.
-            batch_idx: The index of the current batch.
-            
-        Returns:
-            dict: A dictionary of metrics to log.
-        """
-        pass
+    def uses_model_directly(self) -> bool:
+        return any(task.uses_model_directly() for task in self.tasks.values())
 
-    @abstractmethod
-    def configure_optimizers(self):
-        """
-        Configure optimizers and learning rate schedulers.
-        
-        Returns:
-            list: A list of optimizers.
-            list: (Optional) A list of schedulers.
-        """
-        pass
-    
-    @abstractmethod
-    def get_encoder(self):
-        """
-        Return the trained backbone encoder for downstream tasks.
-        
-        Returns:
-            nn.Module: The feature extractor.
-        """
-        pass
-        
-    def on_epoch_end(self, current_epoch, logs=None):
-        """
-        Optional hook called at the end of each epoch.
-        """
-        pass
+    def compute_loss(self, model_output: Any, batch: PretextBatch) -> torch.Tensor:
+        total = torch.tensor(0.0, device=model_output.device if hasattr(model_output, 'device') else 'cpu')
+        for name, task in self.tasks.items():
+            if not task.uses_model_directly():
+                sub = batch.metadata["sub_batches"][name]
+                total = total + self.weights[name] * task.compute_loss(model_output, sub)
+        return total
+
+    def compute_loss_with_model(self, model: nn.Module, batch: PretextBatch) -> torch.Tensor:
+        device = next(model.parameters()).device
+        total = torch.tensor(0.0, device=device)
+        for name, task in self.tasks.items():
+            sub = batch.metadata["sub_batches"][name]
+            if task.uses_model_directly():
+                loss = task.compute_loss_with_model(model, sub)
+            else:
+                output = model(sub.inputs.to(device))
+                loss = task.compute_loss(output, sub)
+            total = total + self.weights[name] * loss
+        return total
