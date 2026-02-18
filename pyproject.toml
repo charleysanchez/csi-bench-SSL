@@ -18,7 +18,7 @@ csi_bench_ssl = { path = ".", editable = true }
 [tool.pixi.tasks]
 
 [tool.pixi.target.linux-64.pypi-dependencies]
-cuda-bindings = "==12.9.4"
+cuda-bindings = ">=11.8,<13"
 triton = "==3.6.0"
 
 [tool.pixi.target.osx-arm64.dependencies]
