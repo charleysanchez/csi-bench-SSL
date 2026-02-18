@@ -1,5 +1,5 @@
 [project]
-dependencies = ["numpy>=2.0", "pandas>=2.0", "scipy>=1.10", "scikit-learn>=1.8.0,<2", "h5py>=3.15.1,<4", "torch>=2.2", "torchvision>=0.24.1,<0.26", "matplotlib>=3.10.8,<4", "seaborn>=0.13.2,<0.14", "ipykernel>=7.2.0,<8", "ipython>=9.10.0,<10", "jupyter-client>=8.8.0,<9", "tqdm>=4.67.3,<5", "pyyaml>=6.0.3,<7"]
+dependencies = ["numpy>=2.0", "pandas>=2.0", "scipy>=1.10", "scikit-learn>=1.8.0,<2", "h5py>=3.15.1,<4", "torch>=2.4.1", "torchvision>=0.19.1", "matplotlib>=3.10.8,<4", "seaborn>=0.13.2,<0.14", "ipykernel>=7.2.0,<8", "ipython>=9.10.0,<10", "jupyter-client>=8.8.0,<9", "tqdm>=4.67.3,<5", "pyyaml>=6.0.3,<7"]
 name = "csi-bench-SSL"
 requires-python = ">= 3.11"
 version = "0.1.0"
@@ -18,8 +18,8 @@ csi_bench_ssl = { path = ".", editable = true }
 [tool.pixi.tasks]
 
 [tool.pixi.target.linux-64.pypi-dependencies]
-cuda-bindings = "==12.9.4"
-triton = "==3.6.0"
+cuda-bindings = ">=12.0"
+triton = ">=2.0"
 
 [tool.pixi.target.osx-arm64.dependencies]
 nomkl = ">=1.0,<2"
@@ -28,10 +28,12 @@ nomkl = ">=1.0,<2"
 tensorboard = ">=2.20.0,<3"
 
 [tool.pixi.feature.cuda118.target.linux-64.dependencies]
-pytorch-cuda = "11.8.*"
+pytorch-cuda = "12.4.*"
+pytorch = "2.4.1"
+torchvision = "0.19.1"
 
 [tool.pixi.feature.cuda118.system-requirements]
-cuda = "11.8"
+cuda = "12.4"
 
 [tool.pixi.environments]
 legacy-gpu = { features = ["cuda118"], solve-group = "default" }
