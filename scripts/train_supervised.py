@@ -19,6 +19,7 @@ import time
 import matplotlib.pyplot as plt
 import warnings
 import yaml
+import torch.multiprocessing as mp
 
 # Mute sklearn warnings about precision/recall being ill-defined
 from sklearn.exceptions import UndefinedMetricWarning
@@ -192,8 +193,10 @@ def main(args=None):
     print(f"Model checkpoints will be saved to: {checkpoint_dir}")
 
     # set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using device: {device}")
+    if device == "mps":
+        mp.set_start_method('spawn', force=True) 
 
     # check for available test splits in the dataset
     task_dir = os.path.join(args.data_dir, args.task)
