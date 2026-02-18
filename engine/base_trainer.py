@@ -20,7 +20,7 @@ class BaseTrainer(ABC):
         self.model = model
         self.data_loader = data_loader
         self.config = config
-        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
         self.model = self.model.to(self.device)
         
         # Set up paths

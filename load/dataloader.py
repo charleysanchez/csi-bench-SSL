@@ -92,7 +92,6 @@ def get_loaders(
     datasets = {}
     for split_name in all_splits:
         try:
-            print(f"Using provided task directory {task_dir}")
             dataset = CSIDataset(
                 root=root,
                 task=task,
@@ -109,7 +108,6 @@ def get_loaders(
                 debug=debug
             )
             datasets[split_name] = dataset
-            print(f"Loaded {len(dataset)} samples for {task} - {split_name}")
         except Exception as e:
             print(f"Error loading split '{split_name}': {str(e)}")
             datasets[split_name] = None

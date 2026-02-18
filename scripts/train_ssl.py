@@ -186,8 +186,12 @@ def main():
     args = parse_args()
     set_seed(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Device: {device}")
+    if device == "mps":
+        args.num_workers = 0
+        args.pin_memory = False
+
     print(f"Save dir: {args.save_dir}")
     os.makedirs(args.save_dir, exist_ok=True)
 
