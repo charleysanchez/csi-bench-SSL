@@ -29,8 +29,8 @@ tensorboard = ">=2.20.0,<3"
 
 [tool.pixi.feature.cuda118.target.linux-64.dependencies]
 pytorch-cuda = "12.4.*"
-pytorch = "2.4.1"
-torchvision = "0.19.1"
+pytorch = "==2.4.1"
+torchvision = "==0.19.1"
 
 [tool.pixi.feature.cuda118.system-requirements]
 cuda = "12.4"
