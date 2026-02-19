@@ -30,3 +30,7 @@ torchvision = "*"
 [tool.pixi.environments]
 mps = { features = ["mps"], solve-group = "default" }
 default = { features = ["gpu"], solve-group = "default" }
+
+[tool.pixi.dependencies]
+jupyter = ">=1.1.1,<2"
+ipykernel = ">=7.2.0,<8"

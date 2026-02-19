@@ -34,8 +34,13 @@ from model.models import (
     TransformerClassifier, 
     ViTClassifier,
     PatchTST,
-    TimesFormer1D
+    TimesFormer1D,
+    SSLClassifier
 )
+
+# Import SSL components for transfer learning
+from model.encoders import ENCODER_REGISTRY
+from pretext_tasks import TASK_REGISTRY
 
 # Import TaskTrainer
 from engine.task_trainer import TaskTrainer
@@ -47,7 +52,11 @@ MODEL_TYPES = {
     'transformer': TransformerClassifier,
     'vit': ViTClassifier,
     'patchtst': PatchTST,
-    'timesformer1d': TimesFormer1D
+    'timesformer1d': TimesFormer1D,
+    # SSL Transfer Models are handled dynamically but listed here for validation
+    'ssl_linear': SSLClassifier,
+    'ssl_gru': SSLClassifier,
+    'ssl_context': SSLClassifier
 }
 
 def custom_collate_fn(batch):
@@ -67,8 +76,21 @@ def main(args=None):
         parser.add_argument('--task', type=str, default='MotionSourceRecognition',
                             help='Name of the task to train on')
         parser.add_argument('--model', type=str, default='vit', 
-                            choices=['mlp', 'lstm', 'resnet18', 'transformer', 'vit', 'patchtst', 'timesformer1d'],
+                            choices=['mlp', 'lstm', 'resnet18', 'transformer', 'vit', 'patchtst', 'timesformer1d',
+                                     'ssl_linear', 'ssl_gru', 'ssl_context'],
                             help='Type of model to train')
+        
+        # Transfer Learning Arguments
+        parser.add_argument('--pretrained_path', type=str, default=None,
+                            help='Path to pre-trained SSL checkpoint (for ssl_* models)')
+        parser.add_argument('--ssl_backbone', type=str, default='csi_encoder',
+                            choices=list(ENCODER_REGISTRY.keys()),
+                            help='Backbone encoder architecture (for ssl_* models)')
+        parser.add_argument('--ssl_task', type=str, default='vqcpc',
+                            choices=list(TASK_REGISTRY.keys()),
+                            help='Pretext task utilized (needed for ssl_context mode)')
+        parser.add_argument('--freeze_encoder', action='store_true',
+                            help='Freeze the backbone encoder (Linear Probing)')
         parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
         parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
         parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
@@ -307,7 +329,110 @@ def main(args=None):
 
     # prepare model
     print(f"Creating {args.model.upper()} model...")
-    ModelClass = MODEL_TYPES[args.model]
+
+    if args.model.startswith('ssl_'):
+        # --- Transfer Learning Logic ---
+        
+        # 1. Instantiate the Encoder
+        print(f"Instantiating Backbone: {args.ssl_backbone}")
+        BackboneClass = ENCODER_REGISTRY[args.ssl_backbone]
+        
+        # Determine encoder_dim matching logic (could be improved with config)
+        encoder_dim = 256 
+        if hasattr(args, 'emb_dim'):
+            encoder_dim = args.emb_dim 
+            
+        print(f"Initializing {args.ssl_backbone} with feature_size={args.feature_size}, model_dim={encoder_dim}")
+        # Assuming all encoders accept these two args. If not, we might need a factory or inspect signature.
+        # But for now, CSIEncoder and CSIConvEncoder do.
+        backbone = BackboneClass(feature_size=args.feature_size, model_dim=encoder_dim)
+        
+        # 2. If 'ssl_context', instantiate Task and wrap it
+        if args.model == 'ssl_context':
+            # Instantiate Pretext Task
+            print(f"Instantiating Task: {args.ssl_task}")
+            TaskClass = TASK_REGISTRY[args.ssl_task]
+            
+            context_dim = 256 
+            if hasattr(args, 'd_model') and args.d_model is not None:
+                context_dim = args.d_model
+            
+            print(f"Initializing {args.ssl_task} with encoder_dim={encoder_dim}, context_dim={context_dim}")
+            # Note: We are assuming VQCPC signature here. 
+            # Ideally, tasks should have a standard init or config dict.
+            # For now this supports VQCPC.
+            task = TaskClass(encoder_dim=encoder_dim, context_dim=context_dim)
+            
+            # Helper Module to bridge Task.get_context to standard forward
+            class ContextBackbone(nn.Module):
+                def __init__(self, encoder, task):
+                    super().__init__()
+                    self.encoder = encoder
+                    self.task = task
+                
+                def forward(self, x):
+                    # x is (B, T, F) window
+                    return self.task.get_context(self.encoder, x)
+            
+            backbone = ContextBackbone(backbone, task)
+            
+        # 3. Load Pretrained Weights
+        if args.pretrained_path:
+            print(f"Loading pretrained weights from {args.pretrained_path}")
+            checkpoint = torch.load(args.pretrained_path, map_location=device)
+            state_dict = checkpoint.get('state_dict', checkpoint)
+            
+            if args.model == 'ssl_context':
+                # Load context backbone weights (encoder + task)
+                missing, unexpected = backbone.load_state_dict(state_dict, strict=False)
+                print(f"Loaded context backbone. Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+            else:
+                # Load encoder weights only (strip 'encoder.' prefix)
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    if k.startswith('encoder.'):
+                        new_state_dict[k[8:]] = v # Remove 'encoder.'
+                
+                missing, unexpected = backbone.load_state_dict(new_state_dict, strict=False)
+                print(f"Loaded encoder backbone. Missing: {len(missing)}, Unexpected: {len(unexpected)}")
+        else:
+            print("WARNING: No pretrained path provided. Training SSL model from scratch (supervised).")
+
+        # 4. Create SSLClassifier Wrapper
+        head_type = 'mean'
+        if args.model == 'ssl_gru':
+            head_type = 'gru'
+        elif args.model == 'ssl_context':
+            head_type = 'context'
+            
+        print(f"Creating SSLClassifier with head_type={head_type}, freeze_encoder={args.freeze_encoder}")
+        # Determine model_dim for classifier head
+        classifier_input_dim = encoder_dim
+        if args.model == 'ssl_context':
+             # We need to access the context_dim we set earlier.
+             # Since 'context_dim' is partial to the if block above, we should initialize it before or ensure scope.
+             # Better: Initialize context_dim to None before, set it inside block.
+             pass 
+
+        # Let's fix the structure slightly to be safer
+        # Define final_model_dim before instantiation
+        final_model_dim = encoder_dim
+        if args.model == 'ssl_context':
+             final_model_dim = context_dim
+
+        model = SSLClassifier(
+            backbone=backbone,
+            input_dim=args.feature_size,
+            model_dim=final_model_dim,
+            num_classes=num_classes,
+            head_type=head_type,
+            freeze_backbone=args.freeze_encoder
+        )
+        # Create a dummy ModelClass for the rest of the script if needed, or just set ModelClass to None to skip
+        ModelClass = None
+        
+    else:
+        ModelClass = MODEL_TYPES[args.model]
 
     model_kwargs = {"num_classes": num_classes}
 
@@ -365,7 +490,8 @@ def main(args=None):
         })
     
     # initialize model
-    model = ModelClass(**model_kwargs)
+    if ModelClass is not None:
+        model = ModelClass(**model_kwargs)
     model = model.to(device)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
