@@ -87,3 +87,9 @@ class CSIConvEncoder(nn.Module):
         x = self.conv(x)       # (B, model_dim, L)
         x = self.pool(x)       # (B, model_dim, 1)
         return x.squeeze(-1)   # (B, model_dim)
+
+
+ENCODER_REGISTRY = {
+    'csi_encoder': CSIEncoder,
+    'csi_conv_encoder': CSIConvEncoder,
+}

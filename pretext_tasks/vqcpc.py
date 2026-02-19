@@ -266,3 +266,28 @@ class VQCPC(MultiPassTask):
         })
 
         return total_loss
+
+    def get_context(self, encoder: nn.Module, inputs: torch.Tensor) -> torch.Tensor:
+        """
+        Extract context vectors for downstream tasks.
+        Args:
+            encoder: The backbone encoder.
+            inputs:  (B, T, F) input sequence.
+        Returns:
+            context: (B, context_dim) The final context vector.
+        """
+        B, T, _ = inputs.shape
+        
+        # Encode
+        flat = inputs.reshape(B * T, -1)
+        z_flat = encoder(flat)
+        z = z_flat.reshape(B, T, -1)
+        
+        # VQ
+        z_q, _, _ = self.vq(z)
+        
+        # AR
+        # Run over the full sequence to get the final context
+        c, _ = self.ar_model(z_q) # (B, T, context_dim)
+        
+        return c[:, -1, :]

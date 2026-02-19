@@ -46,12 +46,8 @@ from load.dataloader import get_loaders
 
 from model.encoders import CSIEncoder, CSIConvEncoder
 from pretext_tasks.vqcpc import VQCPC
-from engine.trainer import (
-    train_one_step,
-    evaluate,
-    save_checkpoint,
-    load_checkpoint,
-)
+
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -275,84 +271,32 @@ def main():
     scheduler = build_scheduler(optimizer, args, steps_per_epoch=len(train_loader))
     grad_clip = args.grad_clip if args.grad_clip > 0 else None
 
+    # ── Wrapper — create SSLBackboneTaskWrapper ──────────────────────────────
+    from engine.ssl_trainer import SSLBackboneTaskWrapper
+    ssl_model = SSLBackboneTaskWrapper(encoder, task)
+    ssl_model = ssl_model.to(device)
+
     # ── Optional resume ───────────────────────────────────────────────────────
     start_epoch = 0
-    if args.resume is not None:
-        start_epoch = load_checkpoint(args.resume, encoder, task, optimizer, scheduler)
-
-    # ── Training loop ─────────────────────────────────────────────────────────
-    best_val_loss = float("inf")
-
-    for epoch in range(start_epoch, args.epochs):
-        encoder.train()
-        task.train()
-
-        epoch_loss = 0.0
-        epoch_metrics: dict[str, float] = {}
-        t0 = time.time()
-        
-        # Use tqdm for progress bar
-        with tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}", unit="batch", dynamic_ncols=True) as pbar:
-            for batch_idx, raw_batch in enumerate(pbar):
-                loss, metrics = train_one_step(
-                    encoder, task, raw_batch, optimizer, device, grad_clip
-                )
-                if scheduler is not None:
-                    scheduler.step()
-
-                epoch_loss += loss
-                
-                # Aggregate metrics
-                for k, v in metrics.items():
-                    if isinstance(v, (int, float)):
-                        epoch_metrics[k] = epoch_metrics.get(k, 0.0) + v
-                    elif isinstance(v, torch.Tensor) and v.numel() == 1:
-                        epoch_metrics[k] = epoch_metrics.get(k, 0.0) + v.item()
-
-                # Update progress bar
-                if (batch_idx + 1) % args.log_interval == 0:
-                    current_metrics = {}
-                    for k, v in metrics.items():
-                        if isinstance(v, (int, float)):
-                            current_metrics[k] = v
-                        elif isinstance(v, torch.Tensor) and v.numel() == 1:
-                            current_metrics[k] = v.item()
-                            
-                    pbar.set_postfix({"loss": f"{loss:.4f}", **current_metrics})
-
-        # ── Epoch summary ─────────────────────────────────────────────────────
-        n = len(train_loader)
-        train_summary = {"train_loss": epoch_loss / n}
-        train_summary.update({k: v / n for k, v in epoch_metrics.items()})
-
-        val_summary = evaluate(encoder, task, val_loader, device)
-
-        elapsed = time.time() - t0
-
-        # Compact summary
-        print(f"Epoch {epoch+1}/{args.epochs} ({elapsed:.1f}s): "
-              f"Train Loss: {train_summary['train_loss']:.4f} | "
-              f"Val Loss: {val_summary['val_loss']:.4f} | "
-              f"Val F1: {val_summary.get('val_cpc_f1', 0.0):.4f}")
-
-        # ── Checkpoint ────────────────────────────────────────────────────────
-        is_best = val_summary["val_loss"] < best_val_loss
-        if is_best:
-            best_val_loss = val_summary["val_loss"]
-
-        save_checkpoint(
-            save_dir=args.save_dir,
-            epoch=epoch,
-            encoder=encoder,
-            task=task,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            metrics={**train_summary, **val_summary},
-            is_best=is_best,
-        )
-
-    print(f"\nPre-training complete. Best val loss: {best_val_loss:.4f}")
-    print(f"Encoder weights: {os.path.join(args.save_dir, 'best.pt')}")
+    # Note: resume logic needs to be adapted for SSLTrainer which expects model_state
+    
+    # ── Trainer — using SSLTrainer ───────────────────────────────────────────
+    trainer = SSLTrainer(
+        model=ssl_model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        device=device,
+        config=args,
+        save_path=args.save_dir
+    )
+    
+    if args.resume:
+        trainer.load_checkpoint(args.resume)
+    
+    # Train
+    trainer.train()
 
 
 if __name__ == "__main__":

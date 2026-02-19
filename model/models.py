@@ -668,3 +668,86 @@ class TimesFormerBlock(nn.Module):
         x = x + self.mlp(self.norm3(x))
         
         return x
+
+class SSLClassifier(nn.Module):
+    """
+    Wrapper for using SSL backbone encoders in supervised tasks.
+    
+    This bridges the gap between:
+    - SSL Encoders (e.g., CSIEncoder) which output (Batch, ModelDim) for a single frame.
+    - Supervised Models which expect (Batch, Channels, Time, Features) for a window.
+    
+    It supports two modes:
+    1. 'mean': Runs encoder on every frame -> (B, T, D) -> Mean Pool -> (B, D) -> Linear Head.
+    2. 'gru': Runs encoder on every frame -> (B, T, D) -> GRU -> (B, D) -> Linear Head.
+    3. 'context': Expects the backbone to return a context vector directly (e.g. VQCPC context). as (B, D).
+    """
+    def __init__(self, backbone, input_dim, model_dim=256, num_classes=2, head_type='mean', freeze_backbone=False):
+        super().__init__()
+        self.backbone = backbone
+        self.input_dim = input_dim
+        self.model_dim = model_dim
+        self.head_type = head_type
+        self.num_classes = num_classes
+        
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+        
+        # Aggregation / Head
+        if head_type == 'gru':
+            # Add a GRU to aggregate temporal features
+            self.aggregator = nn.GRU(model_dim, model_dim, batch_first=True)
+            self.head = nn.Linear(model_dim, num_classes)
+        elif head_type == 'mean':
+            # Mean pooling over time, then linear head
+            self.head = nn.Linear(model_dim, num_classes)
+        elif head_type == 'context':
+            # Assumes backbone returns context vector directly
+            self.head = nn.Linear(model_dim, num_classes)
+        else:
+            raise ValueError(f"Unknown head_type: {head_type}")
+
+    def get_init_params(self):
+        """Return dummy init params. Cannot easily clone backbone object."""
+        return {
+            'input_dim': self.input_dim,
+            'model_dim': self.model_dim,
+            'num_classes': self.num_classes,
+            'head_type': self.head_type
+        }
+
+    def forward(self, x):
+        # Input: (Batch, Channels, Time, Features)
+        if x.dim() == 4:
+            x = x.squeeze(1) # (B, T, F)
+            
+        B, T, F = x.shape
+        
+        if self.head_type == 'context':
+            # Backbone handles the window -> context logic (e.g. VQCPC)
+            # Input needs to match whatever that backbone expects.
+            # VQCPC.forward_encoder expects (B, T, F) -> returns z, c
+            # But here `backbone` might just be the context encoder part or the full wrapper.
+            # We assume `backbone(x)` returns the context vector `c` of shape (B, D).
+            context = self.backbone(x)
+        else:
+            # Frame-wise Encoder Mode
+            # Flatten time: (B*T, F)
+            x_flat = x.view(B*T, F)
+            
+            # Run backbone -> (B*T, D)
+            features = self.backbone(x_flat) 
+            
+            # Reshape back to (B, T, D)
+            features = features.view(B, T, -1)
+            
+            if self.head_type == 'gru':
+                # Run GRU
+                # out: (B, T, D), hidden: (1, B, D)
+                _, hidden = self.aggregator(features)
+                context = hidden.squeeze(0) # (B, D)
+            elif self.head_type == 'mean':
+                context = features.mean(dim=1) # (B, D)
+            
+        return self.head(context)
