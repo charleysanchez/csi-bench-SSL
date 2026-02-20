@@ -4,6 +4,8 @@ import pandas as pd
 from pathlib import Path
 
 from torch.utils.data import Dataset
+import torch.nn.functional as F
+import torch
 
 class PretrainingCSI(Dataset):
     """
@@ -16,11 +18,15 @@ class PretrainingCSI(Dataset):
         file_format=".mat",
         window_size=256,
         stride=128,
+        representation="real_imag",
+        target_sc=58
     ):
         self.root = Path(root)
         self.file_format = file_format
         self.window_size = window_size
         self.stride = stride
+        self.representation = representation
+        self.target_sc = target_sc
 
         # collect file paths
         self.files = list(self.root.rglob(f"*{self.file_format}"))
@@ -28,7 +34,7 @@ class PretrainingCSI(Dataset):
         # build index of (file_path, start_time)
         self.index = self._build_index()
 
-    def build_index(self):
+    def _build_index(self):
         index = []
 
         for path in self.files:
@@ -45,12 +51,65 @@ class PretrainingCSI(Dataset):
     def __len__(self):
         return len(self.index)
     
-    def __get_item__(self, idx):
+    def __getitem__(self, idx):
         path, start = self.index[idx]
 
         # load file
         mat = sio.loadmat(path)
         csi = mat["csi_trace"]["csi"][0, 0]
+
+        # extract window
+        window = csi[:, :, :, start:start+self.window_size]
+
+        # flatten antennas
+        n_tx, n_rx, n_sc, n_t = window.shape
+        window = window.reshape(n_tx * n_rx, n_sc, n_t)
+
+        # update to match representation
+        window = self._format_representation(window)
+
+        # resize carriers
+        if n_sc != self.target_sc:
+            window = self._resize_carriers(window)
+
+        # normalize
+        window = self._normalize_csi(window)
+
+    def _format_representation(self, csi):
+        if self.representation == "real_imag":
+            real = np.real(csi)
+            imag = np.imag(csi)
+            out = np.stack([real, imag], axis=0)
+        elif self.representation == "mag_phase":
+            mag = np.abs(csi)
+            phase = np.angle(csi)
+            out = np.stack([mag, phase], axis=0)
+        elif self.representation == "log_mag":
+            out = np.log(np.abs(csi) + 1e-6)[None, ...]
+        else:
+            raise ValueError("Representation input as: {self.representation}. " \
+                             "Must be one of: [real_imag, mag_phase, log_phase]")
+        
+        return torch.tensor(out, dtype=torch.float32)
+        
+    def _resize_carriers(self, csi, target_sc=58):
+        csi = torch.tensor(csi).float()
+
+        csi = F.interpolate(
+            csi.unsqueeze(0),
+            size=(target_sc, csi.shape[-1]),
+            mode="bilinear",
+            align_corners=False
+        ).squeeze(0)
+
+        return csi
+    
+    def _normalize_csi(self, csi):
+        mean_csi = csi.mean()
+        std_csi = csi.std()
+
+        return (csi - mean_csi) / (std_csi + 1e-6)
+
 
     def load_mat_files(self):
         records = []
