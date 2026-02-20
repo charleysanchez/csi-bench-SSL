@@ -19,6 +19,8 @@ import time
 import matplotlib.pyplot as plt
 import warnings
 import yaml
+from configs.training_config import TrainingConfig
+
 
 # Mute sklearn warnings about precision/recall being ill-defined
 from sklearn.exceptions import UndefinedMetricWarning
@@ -138,9 +140,32 @@ def main(args=None):
                             help='Disable pin memory for data loading (use for MPS devices)')
         parser.add_argument('--pretrained_encoder', type=str, default=None,
                     help='Path to pretrained encoder weights (.pt file)')
+        parser.add_argument('--config', type=str, default=None,
+                    help='Path to YAML config file to override args')
         
         args = parser.parse_args()
 
+    # create TrainingConfig — from yaml if provided, otherwise from args
+    if args.config is not None:
+        training_config = TrainingConfig.from_yaml(args.config)
+        args.emb_dim = training_config.emb_dim
+        args.dropout = training_config.dropout
+        args.epochs = training_config.epochs
+        args.patience = training_config.patience
+        args.learning_rate = training_config.lr
+        args.weight_decay = training_config.weight_decay
+        args.warmup_epochs = training_config.warmup_epochs
+    else:
+        training_config = TrainingConfig(
+            epochs=args.epochs,
+            patience=args.patience,
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay,
+            warmup_epochs=args.warmup_epochs,
+            emb_dim=args.emb_dim,
+            dropout=args.dropout,
+        )
+    
     # set output directory if not specified
     if args.output_dir is None:
         args.output_dir = args.save_dir

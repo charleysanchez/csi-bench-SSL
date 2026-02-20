@@ -19,6 +19,7 @@ from engine.base_trainer import BaseTrainer
 from utils.labels import normalize_labels
 from utils.logging import log_epoch
 from utils.training import predict_from_outputs
+from configs.training_config import TrainingConfig
 
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
@@ -135,9 +136,13 @@ class TaskTrainer(BaseTrainer):
         self.best_epoch = 0
 
     def setup_scheduler(self):
-        """Set up learning rate scheduler."""
-        warmup_epochs = getattr(self.config, "warmup_epochs", 5)
-        total_epochs = getattr(self.config, "epochs", 100)
+        if isinstance(self.config, TrainingConfig):
+            warmup_epochs = self.config.warmup_epochs
+            total_epochs = self.config.epochs
+        else:
+            warmup_epochs = getattr(self.config, "warmup_epochs", 5)
+            total_epochs = getattr(self.config, "epochs", 100)
+        
         self.scheduler = warmup_cosine_lr(
             self.optimizer,
             warmup_epochs=warmup_epochs,
@@ -157,16 +162,16 @@ class TaskTrainer(BaseTrainer):
             epochs = 30
             patience = 15
         else:
-            # number of epochs and patience from config
-            # handle both object attributes and dictionary keys
-            if isinstance(self.config, dict):
-                self.training_config = self.config["training"]
-                epochs = self.training_config.get("epochs", 30)
-                patience = self.training_config.get("epochs", 15)
+            if isinstance(self.config, TrainingConfig):
+                epochs = self.config.epochs
+                patience = self.config.patience
+            elif isinstance(self.config, dict):
+                training_config = self.config.get("training", self.config)
+                epochs = training_config.get("epochs", 30)
+                patience = training_config.get("patience", 15)
             else:
                 epochs = getattr(self.config, "epochs", 30)
                 patience = getattr(self.config, "patience", 15)
-
         # best model state
         best_model = None
         best_val_loss = float("inf")
