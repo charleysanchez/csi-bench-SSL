@@ -136,6 +136,8 @@ def main(args=None):
                             help='Enable pin memory for data loading (not recommended for MPS)')
         parser.add_argument('--no_pin_memory', action='store_true',
                             help='Disable pin memory for data loading (use for MPS devices)')
+        parser.add_argument('--pretrained_encoder', type=str, default=None,
+                    help='Path to pretrained encoder weights (.pt file)')
         
         args = parser.parse_args()
 
@@ -338,6 +340,16 @@ def main(args=None):
     
     # initialize model
     model = ModelClass(**model_kwargs)
+
+    # if coming from pretrained model then load that in
+    if args.pretrained_encoder is not None:
+        print(f"Loading pretrained encoder weights from {args.pretrained_encoder}")
+        state_dict = torch.load(args.pretrained_encoder, map_location=device)
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        print(f"  Missing keys (expected — new head): {missing}")
+        print(f"  Unexpected keys: {unexpected}")
+        print("Pretrained encoder loaded successfully.")
+
     model = model.to(device)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")

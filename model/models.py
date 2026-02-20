@@ -668,3 +668,218 @@ class TimesFormerBlock(nn.Module):
         x = x + self.mlp(self.norm3(x))
         
         return x
+    
+
+class MaskedLSTM(nn.Module):
+    def __init__(self, feature_size=232, hidden_size=256, num_layers=2, dropout=0.3, win_len=None):
+        super().__init__()
+
+        self.feature_size = feature_size
+        self.hidden_size = hidden_size
+
+        self.lstm = nn.LSTM(
+            input_size=feature_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+            bidirectional=True
+        )
+
+        # Reconstruction head
+        self.reconstruction = nn.Linear(hidden_size * 2, feature_size)
+
+    def forward(self, x):
+        # x: [B, 1, T, F]
+        x = x.squeeze(1)  # → [B, T, F]
+
+        lstm_out, _ = self.lstm(x)  # [B, T, 2H]
+
+        # Reconstruct every timestep
+        out = self.reconstruction(lstm_out)  # [B, T, F]
+
+        return out
+    
+
+class MaskedTransformer(nn.Module):
+    def __init__(self, feature_size=232, d_model=256,
+                 nhead=8, num_layers=4, dropout=0.1):
+
+        super().__init__()
+
+        self.input_proj = nn.Linear(feature_size, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model * 4,
+            dropout=dropout,
+            batch_first=True
+        )
+
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers
+        )
+
+        # Reconstruction head
+        self.output_proj = nn.Linear(d_model, feature_size)
+
+    def forward(self, x):
+        # x: [B, 1, T, F]
+        x = x.squeeze(1)  # [B, T, F]
+
+        x = self.input_proj(x)
+        x = self.pos_encoder(x)
+
+        x = self.transformer(x)
+
+        # Reconstruct full sequence
+        x = self.output_proj(x)  # [B, T, F]
+
+        return x
+    
+
+class MaskedPatchTST(nn.Module):
+    def __init__(
+        self,
+        win_len=500,
+        feature_size=232,
+        patch_len=16,
+        stride=8,
+        emb_dim=128,
+        depth=4,
+        num_heads=4,
+        dropout=0.1
+    ):
+        super().__init__()
+
+        self.win_len = win_len
+        self.feature_size = feature_size
+        self.patch_len = patch_len
+        self.stride = stride
+
+        self.num_patches = (win_len - patch_len) // stride + 1
+
+        self.patch_embedding = nn.Conv1d(
+            in_channels=feature_size,
+            out_channels=emb_dim,
+            kernel_size=patch_len,
+            stride=stride
+        )
+
+        self.pos_embedding = nn.Parameter(
+            torch.zeros(1, self.num_patches, emb_dim)
+        )
+        nn.init.trunc_normal_(self.pos_embedding, std=0.02)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=emb_dim,
+            nhead=num_heads,
+            dim_feedforward=4 * emb_dim,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True
+        )
+
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=depth
+        )
+
+        self.norm = nn.LayerNorm(emb_dim)
+
+        # Reconstruction head
+        self.head = nn.Linear(emb_dim, feature_size)
+
+    def forward(self, x):
+        # x: [B, 1, T, F]
+        x = x.squeeze(1)  # [B, T, F]
+
+        x = x.transpose(1, 2)  # → [B, F, T]
+
+        x = self.patch_embedding(x)  # [B, E, N]
+        x = x.transpose(1, 2)        # [B, N, E]
+
+        x = x + self.pos_embedding
+
+        x = self.transformer(x)
+        x = self.norm(x)
+
+        x = self.head(x)  # [B, N, F]
+
+        # Upsample back to original T
+        x = F.interpolate(
+            x.transpose(1, 2),
+            size=self.win_len,
+            mode='linear'
+        ).transpose(1, 2)
+
+        return x  # [B, T, F]
+    
+class MaskedTimesFormer1D(nn.Module):
+    def __init__(self, win_len=500, feature_size=232, patch_size=4, emb_dim=128,
+                 depth=4, num_heads=8, mlp_ratio=4.0, dropout=0.1, attn_dropout=0.1):
+        super().__init__()
+
+        assert win_len % patch_size == 0
+        self.win_len = win_len
+        self.feature_size = feature_size
+        self.patch_size = patch_size
+        self.num_patches = win_len // patch_size
+        self.emb_dim = emb_dim
+
+        self.patch_embed = nn.Sequential(
+            nn.Conv1d(feature_size, emb_dim, kernel_size=patch_size, stride=patch_size),
+            Rearrange('b e n -> b n e')
+        )
+
+        # Match TimesFormer1D exactly
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, emb_dim))
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patches + 1, emb_dim))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
+
+        self.blocks = nn.ModuleList([
+            TimesFormerBlock(dim=emb_dim, num_heads=num_heads, mlp_ratio=mlp_ratio,
+                             dropout=dropout, attn_dropout=attn_dropout)
+            for _ in range(depth)
+        ])
+
+        self.norm = nn.LayerNorm(emb_dim)
+
+        # Reconstruction head — operates on patch tokens only (skip CLS)
+        self.head = nn.Linear(emb_dim, feature_size)
+
+    def forward(self, x):
+        B = x.shape[0]
+        x = x.squeeze(1).transpose(1, 2)        # [B, F, T]
+
+        x = self.patch_embed(x)                  # [B, N, E]
+
+        # Add CLS token
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)   # [B, N+1, E]
+
+        x = x + self.pos_embed
+
+        for block in self.blocks:
+            x = block(x)
+
+        x = self.norm(x)
+
+        # Skip CLS token for reconstruction
+        x = x[:, 1:]                             # [B, N, E]
+        x = self.head(x)                         # [B, N, F]
+
+        # Upsample back to full T
+        x = F.interpolate(
+            x.transpose(1, 2),
+            size=self.win_len,
+            mode="linear",
+            align_corners=False
+        ).transpose(1, 2)                        # [B, T, F]
+
+        return x

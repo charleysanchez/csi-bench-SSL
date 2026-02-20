@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from engine.base_trainer import BaseTrainer
 
+torch.backends.cudnn.benchmark = True
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
     """Warmup learning rate scheduler with cosine annealing."""
@@ -174,7 +175,7 @@ class MaskedTrainer(BaseTrainer):
         total_time = 0.0
 
         loader = tqdm(self.train_loader, leave=False)
-
+        first = True
         for inputs, _ in loader:
             if inputs.size(0) == 0:
                 continue
@@ -187,10 +188,16 @@ class MaskedTrainer(BaseTrainer):
 
             masked_inputs, mask = self.apply_mask(inputs)
 
+            if first and self.current_epoch == 0:
+                self.visualize_mask(inputs, masked_inputs, mask)
+                first = False
+
             self.optimizer.zero_grad()
             outputs = self.model(masked_inputs)
+            targets = inputs.squeeze(1)
+            mask_sq = mask.squeeze(1)
 
-            loss = self.compute_masked_loss(outputs, inputs, mask)
+            loss = self.compute_masked_loss(outputs, targets, mask_sq)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
@@ -243,8 +250,11 @@ class MaskedTrainer(BaseTrainer):
 
                 masked_inputs, mask = self.apply_mask(inputs)
                 outputs = self.model(masked_inputs)
+                targets = inputs.squeeze(1)
+                mask_sq = mask.squeeze(1)
 
-                loss = self.compute_masked_loss(outputs, inputs, mask)
+                loss = self.compute_masked_loss(outputs, targets, mask_sq)
+
                 total_loss += loss.item() * B
 
         if total_samples == 0:
@@ -284,19 +294,64 @@ class MaskedTrainer(BaseTrainer):
     # MASKING
     # -------------------------------------------------
 
-    def apply_mask(self, inputs):
-        B, T, F = inputs.shape
-        mask = torch.ones_like(inputs)
+    def apply_mask(self, inputs, patch_size_t=16, patch_size_f=16, mask_ratio=0.75):
+        B, C, T, F = inputs.shape
+        device = inputs.device
 
-        t0 = torch.randint(0, T - 20, (B,), device=inputs.device)
+        n_t = T // patch_size_t
+        n_f = F // patch_size_f
+        num_patches = n_t * n_f
 
-        for i in range(B):
-            mask[i, t0[i] : t0[i] + 20, :] = 0
+        # Create random mask per batch (patch-level)
+        noise = torch.rand(B, num_patches, device=device)
+        ids_shuffle = torch.argsort(noise, dim=1)
 
-        masked_inputs = inputs * mask
-        return masked_inputs, 1 - mask
+        num_mask = int(mask_ratio * num_patches)
+
+        patch_mask = torch.zeros(B, num_patches, device=device)
+        patch_mask.scatter_(1, ids_shuffle[:, :num_mask], 1)
+
+        # Expand to pixel-level mask
+        patch_mask = patch_mask.view(B, n_t, n_f)
+
+        mask = patch_mask.repeat_interleave(patch_size_t, dim=1)
+        mask = mask.repeat_interleave(patch_size_f, dim=2)
+
+        mask = mask.unsqueeze(1)  # (B, 1, T', F')
+
+        # If T or F not divisible, pad mask
+        full_mask = torch.zeros(B, 1, T, F, device=device)
+        full_mask[:, :, :mask.shape[2], :mask.shape[3]] = mask
+
+        masked_inputs = inputs * (1 - full_mask)
+
+        return masked_inputs, full_mask
 
     def compute_masked_loss(self, outputs, targets, mask):
         diff = (outputs - targets) ** 2
         loss = (diff * mask).sum() / (mask.sum() + 1e-8)
         return loss
+
+    def visualize_mask(self, inputs, masked_inputs, mask, sample_idx=0):
+        """
+        Visualize original, masked, and mask for one sample.
+        Assumes (B, C, T, F) and C=1 for plotting.
+        """
+
+        original = inputs[sample_idx, 0].detach().cpu()
+        masked = masked_inputs[sample_idx, 0].detach().cpu()
+        mask_img = mask[sample_idx, 0].detach().cpu()
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+        axes[0].imshow(original, aspect="auto", origin="lower")
+        axes[0].set_title("Original CSI")
+
+        axes[1].imshow(masked, aspect="auto", origin="lower")
+        axes[1].set_title("Masked CSI")
+
+        axes[2].imshow(mask_img, aspect="auto", origin="lower")
+        axes[2].set_title("Mask (1 = masked)")
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_path, "mask_visualization.png"))
