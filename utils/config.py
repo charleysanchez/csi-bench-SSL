@@ -31,6 +31,20 @@ def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.
             
     # Update args
     for k, v in flat_config.items():
+        if hasattr(args, k):
+            existing_v = getattr(args, k)
+            if existing_v is not None and v is not None:
+                try:
+                    # Special case for booleans
+                    if isinstance(existing_v, bool):
+                        if isinstance(v, str):
+                            v = v.lower() in ("yes", "true", "t", "1")
+                        else:
+                            v = bool(v)
+                    else:
+                        v = type(existing_v)(v)
+                except (ValueError, TypeError):
+                    pass
         setattr(args, k, v)
         
     return args
