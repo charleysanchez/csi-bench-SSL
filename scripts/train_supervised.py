@@ -19,7 +19,7 @@ import time
 import matplotlib.pyplot as plt
 import warnings
 import yaml
-from configs.training_config import TrainingConfig
+from utils.config import update_args_with_yaml, save_config
 
 
 # Mute sklearn warnings about precision/recall being ill-defined
@@ -145,26 +145,9 @@ def main(args=None):
         
         args = parser.parse_args()
 
-    # create TrainingConfig — from yaml if provided, otherwise from args
+    # Override args with YAML config if provided
     if args.config is not None:
-        training_config = TrainingConfig.from_yaml(args.config)
-        args.emb_dim = training_config.emb_dim
-        args.dropout = training_config.dropout
-        args.epochs = training_config.epochs
-        args.patience = training_config.patience
-        args.learning_rate = training_config.lr
-        args.weight_decay = training_config.weight_decay
-        args.warmup_epochs = training_config.warmup_epochs
-    else:
-        training_config = TrainingConfig(
-            epochs=args.epochs,
-            patience=args.patience,
-            lr=args.learning_rate,
-            weight_decay=args.weight_decay,
-            warmup_epochs=args.warmup_epochs,
-            emb_dim=args.emb_dim,
-            dropout=args.dropout,
-        )
+        args = update_args_with_yaml(args, args.config)
     
     # set output directory if not specified
     if args.output_dir is None:
@@ -388,33 +371,10 @@ def main(args=None):
 
     criterion = nn.CrossEntropyLoss()
 
-    # create config dictionary for saving
-    config = {
-        'model': {
-            'model_name': args.model,
-            'task': args.task,
-        },
-        'training': {
-            'num_classes': num_classes,
-            'batch_size': args.batch_size,
-            'learning_rate': args.learning_rate,
-            'weight_decay': args.weight_decay,
-            'epochs': args.epochs,
-            'warmup_epochs': args.warmup_epochs,
-            'patience': args.patience,
-            'win_len': args.win_len,
-            'feature_size': args.feature_size,
-        },
-        "testing": {
-            'test_splits': test_splits
-        }
-    }
-
     # save configuration
     config_path = os.path.join(results_dir, f"{args.model}_{args.task}_config.yaml")
-    with open(config_path, "w") as f:
-        yaml.dump(config, f, sort_keys=False)
-        print(f"Successfully saved configuration to {os.path.abspath(config_path)}")
+    save_config(args, config_path)
+    print(f"Successfully saved configuration to {os.path.abspath(config_path)}")
 
     # create TaskTrainer
     trainer = TaskTrainer(
@@ -427,7 +387,7 @@ def main(args=None):
         device=device,
         save_path=checkpoint_dir,
         num_classes=num_classes,
-        config=config,
+        config=args,
         label_mapper=label_mapper
     )
 
@@ -554,7 +514,7 @@ def main(args=None):
                     'best_val_accuracy': val_accuracy,
                     'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
                     'best_experiment_id': experiment_id,
-                    'best_experiment_params': config,
+                    'best_experiment_params': vars(args),
                     'best_test_accuracies': test_accuracies,
                     'best_test_f1_scores': test_f1_scores,
                     'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
@@ -573,7 +533,7 @@ def main(args=None):
                 'best_val_accuracy': val_accuracy,
                 'best_val_loss': float(history.iloc[best_epoch-1]['Val Loss']),
                 'best_experiment_id': experiment_id,
-                'best_experiment_params': config,
+                'best_experiment_params': vars(args),
                 'best_test_accuracies': test_accuracies,
                 'best_test_f1_scores': test_f1_scores,
                 'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')

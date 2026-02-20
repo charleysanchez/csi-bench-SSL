@@ -15,6 +15,7 @@ import time
 
 from load.dataloader import get_loaders
 from engine.masked_trainer import MaskedTrainer
+from utils.config import update_args_with_yaml, save_config
 from model.models import (
     MaskedLSTM,
     MaskedPatchTST,
@@ -62,7 +63,14 @@ def main():
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--pin_memory", action="store_true")
 
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to YAML config file to override args")
+
     args = parser.parse_args()
+    
+    # Override args with YAML config if provided
+    if args.config is not None:
+        args = update_args_with_yaml(args, args.config)
 
     # -------------------------------------------------
     # SEED
@@ -144,21 +152,7 @@ def main():
     # CONFIG SAVE
     # -------------------------------------------------
 
-    config = {
-        "model": args.model,
-        "task": args.task,
-        "training": {
-            "batch_size": args.batch_size,
-            "learning_rate": args.learning_rate,
-            "weight_decay": args.weight_decay,
-            "epochs": args.epochs,
-            "warmup_epochs": args.warmup_epochs,
-            "patience": args.patience,
-        },
-    }
-
-    with open(os.path.join(results_dir, "config.yaml"), "w") as f:
-        yaml.dump(config, f)
+    save_config(args, os.path.join(results_dir, "config.yaml"))
 
     # -------------------------------------------------
     # TRAINER

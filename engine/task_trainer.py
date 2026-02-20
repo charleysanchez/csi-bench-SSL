@@ -19,7 +19,6 @@ from engine.base_trainer import BaseTrainer
 from utils.labels import normalize_labels
 from utils.logging import log_epoch
 from utils.training import predict_from_outputs
-from configs.training_config import TrainingConfig
 
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
@@ -136,12 +135,8 @@ class TaskTrainer(BaseTrainer):
         self.best_epoch = 0
 
     def setup_scheduler(self):
-        if isinstance(self.config, TrainingConfig):
-            warmup_epochs = self.config.warmup_epochs
-            total_epochs = self.config.epochs
-        else:
-            warmup_epochs = getattr(self.config, "warmup_epochs", 5)
-            total_epochs = getattr(self.config, "epochs", 100)
+        warmup_epochs = getattr(self.config, "warmup_epochs", 5)
+        total_epochs = getattr(self.config, "epochs", 100)
         
         self.scheduler = warmup_cosine_lr(
             self.optimizer,
@@ -162,16 +157,8 @@ class TaskTrainer(BaseTrainer):
             epochs = 30
             patience = 15
         else:
-            if isinstance(self.config, TrainingConfig):
-                epochs = self.config.epochs
-                patience = self.config.patience
-            elif isinstance(self.config, dict):
-                training_config = self.config.get("training", self.config)
-                epochs = training_config.get("epochs", 30)
-                patience = training_config.get("patience", 15)
-            else:
-                epochs = getattr(self.config, "epochs", 30)
-                patience = getattr(self.config, "patience", 15)
+            epochs = getattr(self.config, "epochs", 30)
+            patience = getattr(self.config, "patience", 15)
         # best model state
         best_model = None
         best_val_loss = float("inf")
