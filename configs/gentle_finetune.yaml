@@ -1,0 +1,27 @@
+# Very low LR with strong L2 regularization for gentle fine-tuning
+# Designed to minimally disturb pretrained encoder features
+training:
+  epochs: 100
+  patience: 25
+  batch_size: 64
+
+optimizer:
+  name: adamw
+  lr: 0.0001
+  weight_decay: 1e-3
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 15
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 128
+  depth: 4
+  num_heads: 8
+  dropout: 0.2
+  attn_dropout: 0.15
+  head_dropout: 0.3
+  patch_size: 4

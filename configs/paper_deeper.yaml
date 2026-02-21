@@ -1,0 +1,26 @@
+# Deeper model variant (train from scratch — cannot use pretrained encoder)
+# Increases depth and embedding dimension for potentially better hard-case generalization.
+training:
+  epochs: 100
+  patience: 15
+  batch_size: 128
+
+optimizer:
+  name: adamw
+  lr: 0.0005
+  weight_decay: 1e-5
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 10
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 256
+  depth: 6
+  num_heads: 8
+  dropout: 0.15
+  head_dropout: 0.3
+  patch_size: 4

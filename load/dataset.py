@@ -135,7 +135,7 @@ class CSIDataset(Dataset):
             # reshape to (1, time_index, feature_size)
             if len(csi_tensor.shape) == 3:  # (time_index, feature_size, 1)
                 # Permute to get (1, time_index, feature_size)
-                csi_tensor = csi_tensor.permute(2, 0, 1)
+                csi_tensor = csi_tensor.permute(2, 1, 0)
 
             # standardize along time and feature dimensions
             mean = csi_tensor.mean(dim=(1, 2), keepdim=True)

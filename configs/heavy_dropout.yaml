@@ -1,0 +1,27 @@
+# Heavy dropout + strong weight decay to combat overfitting
+# Uses pretrained encoder with aggressive regularization
+training:
+  epochs: 100
+  patience: 20
+  batch_size: 128
+
+optimizer:
+  name: adamw
+  lr: 0.0005
+  weight_decay: 5e-4
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 10
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 128
+  depth: 4
+  num_heads: 8
+  dropout: 0.3
+  attn_dropout: 0.2
+  head_dropout: 0.4
+  patch_size: 4

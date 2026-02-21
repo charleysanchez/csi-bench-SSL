@@ -1,0 +1,26 @@
+# Smaller/shallower model to reduce overfitting via capacity constraint
+# Uses pretrained encoder (depth=4 matches but emb_dim=64 does NOT — train from scratch)
+training:
+  epochs: 100
+  patience: 20
+  batch_size: 128
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 1e-4
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 64
+  depth: 2
+  num_heads: 4
+  dropout: 0.2
+  head_dropout: 0.3
+  patch_size: 4

@@ -14,7 +14,8 @@ scheduler:
   name: warmup_cosine
 general:
   data_dir: data
-  task: FallDetection
+  task: null
+  all_tasks: true
   model: timesformer1d
   save_dir: pretrain_results
   seed: 42

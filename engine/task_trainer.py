@@ -192,8 +192,7 @@ class TaskTrainer(BaseTrainer):
             self.train_accuracies.append(train_acc)
             self.val_accuracies.append(val_acc)
 
-            # step scheduler
-            self.scheduler.step()
+            # step scheduler is now done per batch in train_epoch()
 
             # only log from rank 0 in distributed mode
             if not self.distributed or (
@@ -352,6 +351,9 @@ class TaskTrainer(BaseTrainer):
                 self.model.parameters(), max_norm=1.0
             )
             self.optimizer.step()
+
+            # step scheduler per batch (step-level cosine warmup)
+            self.scheduler.step()
 
             # accumulate loss and accuracy
             epoch_loss += loss.item() * batch_size

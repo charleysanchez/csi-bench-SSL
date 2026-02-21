@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
+import math
 
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -371,6 +372,20 @@ def main(args=None):
 
     criterion = nn.CrossEntropyLoss()
 
+    # create step-level warmup cosine LR scheduler (matches original repo)
+    num_steps = len(train_loader) * args.epochs
+    warmup_steps = len(train_loader) * args.warmup_epochs
+
+    def warmup_cosine_schedule(step):
+        if step < warmup_steps:
+            return float(step) / float(max(1, warmup_steps))
+        else:
+            progress = float(step - warmup_steps) / float(max(1, num_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
+    print(f"Using step-level warmup cosine LR scheduler: {warmup_steps} warmup steps, {num_steps} total steps")
+
     # save configuration
     config_path = os.path.join(results_dir, f"{args.model}_{args.task}_config.yaml")
     save_config(args, config_path)
@@ -384,6 +399,7 @@ def main(args=None):
         test_loader=test_loaders,
         criterion=criterion,
         optimizer=optimizer,
+        scheduler=scheduler,
         device=device,
         save_path=checkpoint_dir,
         num_classes=num_classes,

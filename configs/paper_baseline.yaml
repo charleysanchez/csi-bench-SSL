@@ -1,0 +1,25 @@
+# Paper-exact baseline (CSI-Bench, arXiv 2505.21866, Section B.3)
+# Matches the paper's training protocol and TimesFormer1D architecture exactly.
+training:
+  epochs: 100
+  patience: 15
+  batch_size: 128
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 1e-5
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 128
+  depth: 4
+  num_heads: 8
+  dropout: 0.1
+  patch_size: 4

@@ -13,7 +13,10 @@ import hashlib
 import yaml
 import time
 
+from torch.utils.data import DataLoader, ConcatDataset
 from load.dataloader import get_loaders
+from load.dataset import CSIDataset
+from load.pretrain_dataset import PretrainDataset
 from engine.masked_trainer import MaskedTrainer
 from utils.config import update_args_with_yaml, save_config
 from model.models import (
@@ -43,7 +46,10 @@ def main():
     parser = argparse.ArgumentParser(description="Masked CSI Pretraining")
 
     parser.add_argument("--data_dir", type=str, default="data")
-    parser.add_argument("--task", type=str, required=True)
+    parser.add_argument("--task", type=str, default=None,
+                        help="Single task to pretrain on. Omit to use --all_tasks.")
+    parser.add_argument("--all_tasks", action="store_true",
+                        help="Pretrain on all available tasks combined.")
     parser.add_argument("--model", type=str, default="lstm",
                         choices=list(MODEL_TYPES.keys()))
 
@@ -67,7 +73,11 @@ def main():
                         help="Path to YAML config file to override args")
 
     args = parser.parse_args()
-    
+
+    # require either --task or --all_tasks
+    if args.task is None and not args.all_tasks:
+        parser.error("Provide either --task <task_name> or --all_tasks")
+
     # Override args with YAML config if provided
     if args.config is not None:
         args = update_args_with_yaml(args, args.config)
@@ -85,11 +95,12 @@ def main():
     # EXPERIMENT ID
     # -------------------------------------------------
 
+    task_label = "all_tasks" if args.all_tasks else args.task
     param_str = f"{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}"
     experiment_id = hashlib.md5(param_str.encode()).hexdigest()[:10]
 
     results_dir = os.path.join(
-        args.save_dir, args.task, args.model, experiment_id
+        args.save_dir, task_label, args.model, experiment_id
     )
     os.makedirs(results_dir, exist_ok=True)
 
@@ -104,24 +115,107 @@ def main():
     print(f"Using device: {device}")
 
     # -------------------------------------------------
-    # LOAD DATA (NO LABELS USED)
+    # COLLATE FN
     # -------------------------------------------------
 
-    print("Loading dataset...")
-    data = get_loaders(
-        root=args.data_dir,
-        task=args.task,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_memory,
-    )
+    def collate_skip_none(batch):
+        batch = [b for b in batch if b is not None]
+        if len(batch) == 0:
+            return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0)
+        return torch.utils.data.dataloader.default_collate(batch)
 
-    train_loader = data["loaders"]["train"]
-    val_loader = data["loaders"].get("val", None)
+    # -------------------------------------------------
+    # LOAD DATA
+    # -------------------------------------------------
 
-    if val_loader is None:
-        print("No validation split found — using training loader for validation.")
-        val_loader = train_loader
+    if args.all_tasks:
+        print("\nLoading datasets for all tasks...")
+
+        task_dirs = sorted([
+            d for d in os.listdir(args.data_dir)
+            if os.path.isdir(os.path.join(args.data_dir, d))
+            and d not in ["RawContinuousRecording", "ProximityRecognition", "Localization"]
+        ])
+        print(f"Found tasks: {task_dirs}")
+
+        train_datasets = []
+        val_datasets = []
+
+        for task in task_dirs:
+            task_dir = os.path.join(args.data_dir, task)
+            splits_dir = os.path.join(task_dir, "splits")
+
+            if not os.path.exists(splits_dir):
+                print(f"  Skipping {task} — no splits directory")
+                continue
+
+            try:
+                train_ds = PretrainDataset(
+                    root=args.data_dir,
+                    task=task,
+                    split="train_id",
+                    task_dir=task_dir,
+                )
+                train_datasets.append(train_ds)
+                print(f"  {task} train: {len(train_ds)} samples")
+            except Exception as e:
+                print(f"  Skipping {task} train: {e}")
+
+            try:
+                val_ds = PretrainDataset(
+                    root=args.data_dir,
+                    task=task,
+                    split="val_id",
+                    task_dir=task_dir,
+                )
+                val_datasets.append(val_ds)
+                print(f"  {task} val:   {len(val_ds)} samples")
+            except Exception as e:
+                print(f"  Skipping {task} val: {e}")
+
+        if not train_datasets:
+            raise RuntimeError("No training datasets found.")
+
+        combined_train = ConcatDataset(train_datasets)
+        combined_val = ConcatDataset(val_datasets) if val_datasets else None
+
+        print(f"\nTotal train samples: {len(combined_train)}")
+        print(f"Total val samples:   {len(combined_val) if combined_val else 0}")
+
+        train_loader = DataLoader(
+            combined_train,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+            collate_fn=collate_skip_none,
+        )
+
+        val_loader = DataLoader(
+            combined_val,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+            collate_fn=collate_skip_none,
+        ) if combined_val else None
+
+    else:
+        print(f"Loading dataset for task: {args.task}")
+        data = get_loaders(
+            root=args.data_dir,
+            task=args.task,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=args.pin_memory,
+        )
+
+        train_loader = data["loaders"]["train"]
+        val_loader = data["loaders"].get("val", None)
+
+        if val_loader is None:
+            print("No validation split found — using training loader for validation.")
+            val_loader = train_loader
 
     # -------------------------------------------------
     # MODEL
@@ -180,6 +274,7 @@ def main():
         "best_epoch": training_results["best_epoch"],
         "best_val_loss": float(training_results["best_val_loss"]),
         "experiment_id": experiment_id,
+        "task": task_label,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
@@ -191,10 +286,12 @@ def main():
         if not k.startswith("head")
     }
 
-    torch.save(encoder_state_dict, os.path.join(results_dir, "encoder_weights.pt"))
+    encoder_path = os.path.join(results_dir, "encoder_weights.pt")
+    torch.save(encoder_state_dict, encoder_path)
+    print(f"Encoder weights saved to {encoder_path}")
 
     print("\nPretraining complete.")
-    print(f"Best epoch: {summary['best_epoch']}")
+    print(f"Best epoch:    {summary['best_epoch']}")
     print(f"Best val loss: {summary['best_val_loss']:.6f}")
 
     return summary, model
