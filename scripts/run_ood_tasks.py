@@ -32,7 +32,7 @@ for task in TASKS:
         print(f"{'-'*60}\n")
         
         cmd = [
-            sys.executable, "scripts/train_supervised.py",
+            sys.executable, "-u", "scripts/train_supervised.py",
             "--task", task,
             "--model", MODEL,
             "--pretrained_encoder", ENCODER,

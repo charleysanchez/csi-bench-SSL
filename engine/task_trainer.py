@@ -449,6 +449,9 @@ class TaskTrainer(BaseTrainer):
                 correct = (preds.view(-1) == labels.view(-1).long()).sum().item()
 
                 total_correct += correct
+                
+                # free memory immediately 
+                del inputs, labels, outputs, preds, loss
 
         # calculate averages
         avg_loss = total_loss / total_samples
@@ -576,6 +579,9 @@ class TaskTrainer(BaseTrainer):
                 # collect all predictions and labels
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
+                
+                # free memory 
+                del data, labels, outputs, preds
 
         # convert to numpy arrays
         all_preds = np.array(all_preds)
@@ -583,11 +589,16 @@ class TaskTrainer(BaseTrainer):
 
         # get class names if available
         class_names = None
+        labels_list = None
         if self.label_mapper is not None:
             class_names = list(self.label_mapper["label_to_idx"].keys())
+            labels_list = list(range(len(class_names)))
 
         # plot confusion matrix
-        cm = confusion_matrix(all_labels, all_preds)
+        if labels_list is not None:
+            cm = confusion_matrix(all_labels, all_preds, labels=labels_list)
+        else:
+            cm = confusion_matrix(all_labels, all_preds)
         plt.figure(figsize=(10, 8))
         sns.heatmap(
             cm,
@@ -683,12 +694,15 @@ class TaskTrainer(BaseTrainer):
                 else:
                     # binary
                     if isinstance(self.criterion, nn.BCEWithLogitsLoss):
-                        preds = (outputs > 0).long().squeeze()
+                        preds = (outputs > 0 ).long().squeeze()
                     else:
                         preds = (outputs > 0.5).long().squeeze()
 
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
+                
+                # free memory 
+                del inputs, labels, outputs, preds
 
         # convert to numpy arrays
         all_preds = np.array(all_preds)

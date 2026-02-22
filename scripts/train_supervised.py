@@ -415,7 +415,14 @@ def main(args=None):
     # evaluate on test dataset
     print("\nEvaluating on test splits:")
     all_results = {}
+    
+    import gc
+    
     for key, loader in test_loaders.items():
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         print(f"Evaluating on {key} split:")
         loss, accuracy = trainer.evaluate(loader)
         f1_score, _ = trainer.calculate_metrics(loader)
