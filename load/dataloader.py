@@ -142,7 +142,7 @@ def get_loaders(
             batch_size=batch_size,
             sampler=val_sampler,
             num_workers=num_workers,
-            pin_memory=pin_memory,
+            pin_memory=False,
             collate_fn=collate_fn
         )
 
@@ -164,7 +164,7 @@ def get_loaders(
                 batch_size=batch_size,
                 sampler=test_sampler,
                 num_workers=num_workers,
-                pin_memory=pin_memory,
+                pin_memory=False,
                 collate_fn=collate_fn
             )
     else:
@@ -183,7 +183,7 @@ def get_loaders(
             batch_size=batch_size,
             shuffle=False,
             num_workers=num_workers,
-            pin_memory=pin_memory,
+            pin_memory=False,
             collate_fn=collate_fn
         )
 
@@ -200,7 +200,7 @@ def get_loaders(
                 batch_size=batch_size,
                 shuffle=False,
                 num_workers=num_workers,
-                pin_memory=pin_memory,
+                pin_memory=False,
                 collate_fn=collate_fn
             )
 
