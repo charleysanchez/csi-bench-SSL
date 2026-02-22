@@ -1,0 +1,25 @@
+training:
+  batch_size: 128
+  epochs: 200
+  warmup_epochs: 10
+  patience: 30
+model_params:
+  win_len: 500
+  feature_size: 232
+optimizer:
+  lr: 5e-4
+  weight_decay: 0.0001
+  name: adamw
+scheduler:
+  name: warmup_cosine
+general:
+  data_dir: data
+  task: null
+  all_tasks: true
+  model: timesformer1d
+  save_dir: pretrain_results
+  seed: 42
+  num_workers: 8
+  pin_memory: false
+  config: configs/pretrain_improved.yaml
+  min_lr_ratio: 0.01

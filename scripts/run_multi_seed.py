@@ -14,8 +14,8 @@ import numpy as np
 
 # Configuration
 SEEDS = list(range(42, 57))  # 15 seeds: 42-56
-CONFIG = "configs/paper_baseline.yaml"
-ENCODER = "pretrain_results/all_tasks/timesformer1d/be74f889f5/encoder_weights.pt"
+CONFIG = "configs/paper_low_lr.yaml"
+ENCODER = "pretrain_results/all_tasks/timesformer1d/fe5af1b0dc/encoder_weights.pt"
 TASK = "FallDetection"
 MODEL = "timesformer1d"
 RESULTS_BASE = "results/FallDetection/timesformer1d"

@@ -6,6 +6,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
+import math
 import torch
 import numpy as np
 import json
@@ -243,6 +244,25 @@ def main():
     )
 
     # -------------------------------------------------
+    # STEP-LEVEL LR SCHEDULER
+    # -------------------------------------------------
+
+    num_steps = len(train_loader) * args.epochs
+    warmup_steps = len(train_loader) * args.warmup_epochs
+    min_lr_ratio = getattr(args, 'min_lr_ratio', 0.0)
+
+    def warmup_cosine_schedule(step):
+        if step < warmup_steps:
+            return float(step) / float(max(1, warmup_steps))
+        else:
+            progress = float(step - warmup_steps) / float(max(1, num_steps - warmup_steps))
+            cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+            return min_lr_ratio + (1 - min_lr_ratio) * cosine
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
+    print(f"Using step-level warmup cosine LR scheduler: {warmup_steps} warmup steps, {num_steps} total steps")
+
+    # -------------------------------------------------
     # CONFIG SAVE
     # -------------------------------------------------
 
@@ -257,6 +277,7 @@ def main():
         train_loader=train_loader,
         val_loader=val_loader,
         optimizer=optimizer,
+        scheduler=scheduler,
         device=device,
         save_path=results_dir,
         config=args,

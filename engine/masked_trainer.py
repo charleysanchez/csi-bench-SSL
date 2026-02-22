@@ -117,7 +117,7 @@ class MaskedTrainer(BaseTrainer):
             self.train_losses.append(train_loss)
             self.val_losses.append(val_loss)
 
-            self.scheduler.step()
+            # step scheduler is now done per batch in train_epoch()
 
             if not self.distributed or self.local_rank == 0:
                 print(f"Train Loss: {train_loss:.6f}")
@@ -201,6 +201,9 @@ class MaskedTrainer(BaseTrainer):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
+
+            # step scheduler per batch (step-level cosine warmup)
+            self.scheduler.step()
 
             total_loss += loss.item() * B
             total_time += time.perf_counter() - start_time

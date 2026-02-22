@@ -1,0 +1,20 @@
+# Improved pretraining config for all-tasks TimesFormer1D
+# Key changes from original: larger batch, longer training, more warmup
+training:
+  epochs: 200
+  patience: 30
+  batch_size: 128
+
+optimizer:
+  name: adamw
+  lr: 5e-4
+  weight_decay: 1e-4
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 10
+  min_lr_ratio: 0.01
+
+model_params:
+  win_len: 500
+  feature_size: 232
