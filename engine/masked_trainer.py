@@ -176,7 +176,8 @@ class MaskedTrainer(BaseTrainer):
 
         loader = tqdm(self.train_loader, leave=False)
         first = True
-        for inputs, _ in loader:
+        for batch in loader:
+            inputs = batch[0]
             if inputs.size(0) == 0:
                 continue
 
@@ -243,7 +244,8 @@ class MaskedTrainer(BaseTrainer):
         total_samples = 0
 
         with torch.no_grad():
-            for inputs, _ in loader:
+            for batch in loader:
+                inputs = batch[0]
                 if inputs.size(0) == 0:
                     continue
 
