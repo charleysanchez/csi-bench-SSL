@@ -1,0 +1,16 @@
+pipeline: "supervised"
+training_dir: "data"
+output_dir: "results"
+available_models: 
+  - "transformer"
+  - "mlp"
+  - "cnn"
+task: "FallDetection"
+
+training:
+  epochs: 50
+  batch_size: 64
+
+model_params:
+  win_len: 500
+  feature_size: 232

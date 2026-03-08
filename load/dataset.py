@@ -140,19 +140,23 @@ class CSIDataset(Dataset):
             # standardize along time and feature dimensions
             mean = csi_tensor.mean(dim=(1, 2), keepdim=True)
             std = csi_tensor.std(dim=(1, 2), keepdim=True)
-            csi_standardized = (csi_tensor - mean) / (std + 1e-8)
+            std = torch.clamp(std, min=1e-8)
+            csi_standardized = (csi_tensor - mean) / std
 
-            # scale to (1, 500, 232) using interpolation
-            csi_standardized =  csi_standardized.unsqueeze(1)
+            # Instead of interpolation, we want to pad/clip dynamically like the official repo
+            batch_size, time_index, feature_size = csi_standardized.shape
+            target_time_index, target_feature_size = 500, 232
 
-            csi_standardized = F.interpolate(
-                csi_standardized,
-                size=(500, 232),
-                mode="bilinear",
-                align_corners=False
-            )
+            # Create a tensor of zeros with the target shape
+            padded_data = torch.zeros((batch_size, target_time_index, target_feature_size), dtype=csi_standardized.dtype)
 
-            csi_standardized = csi_standardized.squeeze(1)
+            # Calculate dimensions for copying (clip or use the smaller of original and target)
+            copy_time = min(time_index, target_time_index)
+            copy_feature = min(feature_size, target_feature_size)
+
+            # Copy data to the standardized tensor (handles both clipping and partial filling)
+            padded_data[:, :copy_time, :copy_feature] = csi_standardized[:, :copy_time, :copy_feature]
+            csi_standardized = padded_data.squeeze(0) # Squeeze dummy batch dim
 
             if self.transform:
                 csi_standardized = self.transform(csi_standardized)
@@ -162,7 +166,9 @@ class CSIDataset(Dataset):
             if self.target_transform:
                 label = self.target_transform(label)
 
-            label_idx = self.label_mapper["label_to_idx"][label]
+            label_key = str(label)
+
+            label_idx = self.label_mapper["label_to_idx"][label_key]
 
             return csi_standardized, label_idx
         except Exception as e:

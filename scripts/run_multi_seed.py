@@ -13,13 +13,13 @@ import glob
 import numpy as np
 
 # Configuration
-SEEDS = list(range(42, 57))  # 15 seeds: 42-56
+SEEDS = list(range(42, 142))  # 15 seeds: 42-56
 CONFIG = "configs/paper_low_lr.yaml"
 ENCODER = "pretrain_results/all_tasks/timesformer1d/fe5af1b0dc/encoder_weights.pt"
 TASK = "FallDetection"
 MODEL = "timesformer1d"
 RESULTS_BASE = "results/FallDetection/timesformer1d"
-MULTI_SEED_DIR = "results/FallDetection/timesformer1d/multi_seed_results"
+MULTI_SEED_DIR = "results/FallDetection/timesformer1d/multi_seed_results_zeropad"
 
 os.makedirs(MULTI_SEED_DIR, exist_ok=True)
 
