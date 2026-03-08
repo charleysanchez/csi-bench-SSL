@@ -883,3 +883,134 @@ class MaskedTimesFormer1D(nn.Module):
         ).transpose(1, 2)                        # [B, T, F]
 
         return x
+
+class CausalConv1d(nn.Module):
+    """Causal convolutions for preventing time-leakage in autoregressive encoders."""
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super().__init__()
+        self.pad = kernel_size - 1
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
+
+    def forward(self, x):
+        # Pad only on the left side (past) to maintain causality
+        x = F.pad(x, (self.pad, 0))
+        return self.conv(x)
+
+
+class CPCClassifier(nn.Module):
+    """Classifier using CPC's feature encoder (g_enc) and autoregressive model (g_ar)"""
+    def __init__(self, feature_size=232, hidden_size=256, num_classes=2, win_len=None):
+        super().__init__()
+        self.feature_size = feature_size
+        self.hidden_size = hidden_size
+        self.num_classes = num_classes
+        self.win_len = win_len
+        
+        self.g_enc = nn.Sequential(
+            CausalConv1d(feature_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            CausalConv1d(hidden_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+        )
+
+        self.g_ar = nn.GRU(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False # Strictly causal
+        )
+        
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_size, num_classes)
+        )
+        
+    def get_init_params(self):
+        return {
+            'feature_size': self.feature_size,
+            'hidden_size': self.hidden_size,
+            'num_classes': self.num_classes,
+            'win_len': self.win_len
+        }
+        
+    def forward(self, x):
+        if x.dim() == 4:
+            x = x.squeeze(1)
+            
+        x = x.transpose(1, 2)
+        z = self.g_enc(x)
+        z = z.transpose(1, 2)
+        
+        c, _ = self.g_ar(z)
+        
+        # Take the last hidden state of the GRU for classification
+        hidden = c[:, -1, :]
+        
+        return self.fc(hidden)
+
+
+class CPCModel(nn.Module):
+    """
+    Contrastive Predictive Coding (CPC) Model.
+    Uses a feature encoder (g_enc) and an autoregressive model (g_ar) (GRU).
+    """
+    def __init__(self, feature_size=232, hidden_size=256, cpc_k_steps=4, win_len=None):
+        super().__init__()
+        self.feature_size = feature_size
+        self.hidden_size = hidden_size
+        self.cpc_k_steps = cpc_k_steps
+
+        # g_enc: Feature Encoder (x_t -> z_t)
+        # BUG FIX: Replaced non-causal padding Conv1d with CausalConv1d.
+        # Standard padding looks into the future ($x_{t+1}$), creating a trivial shortcut for CPC.
+        self.g_enc = nn.Sequential(
+            CausalConv1d(feature_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            CausalConv1d(hidden_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+        )
+
+        # g_ar: Autoregressive model (z_{<=t} -> c_t). Causal/unidirectional GRU.
+        self.g_ar = nn.GRU(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False # Strictly causal
+        )
+
+        # W_k: Linear projections for predicting future steps k
+        self.W_k = nn.ModuleList([
+            nn.Linear(hidden_size, hidden_size, bias=False) 
+            for _ in range(cpc_k_steps)
+        ])
+
+    def forward(self, x):
+        # x shape: [B, 1, T, F] or [B, T, F]
+        if x.dim() == 4:
+            x = x.squeeze(1) # [B, T, F]
+
+        # Apply g_enc
+        # Conv1d expects [B, F, T], so we transpose
+        x = x.transpose(1, 2)
+        z = self.g_enc(x) # [B, H, T]
+        z = z.transpose(1, 2) # [B, T, H]
+
+        # Apply g_ar to get context
+        c, _ = self.g_ar(z) # [B, T, hidden_size]
+        
+        # Predict future embeddings c_t -> z_{t+k}
+        preds = []
+        for k in range(self.cpc_k_steps):
+            preds.append(self.W_k[k](c))
+            
+        return z, c, preds

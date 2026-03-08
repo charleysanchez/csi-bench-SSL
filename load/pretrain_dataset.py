@@ -10,6 +10,14 @@ class PretrainDataset(_CSIDataset):
 
     def __getitem__(self, index):
         try:
-            return super().__getitem__(index)
+            result = super().__getitem__(index)
+            if result is None:
+                return None
+            
+            csi, label = result
+            row = self.split_metadata.iloc[index]
+            user = row.get("user", f"unknown_user_{index}")
+            
+            return csi, label, user
         except Exception:
             return None

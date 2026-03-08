@@ -35,7 +35,8 @@ from model.models import (
     TransformerClassifier, 
     ViTClassifier,
     PatchTST,
-    TimesFormer1D
+    TimesFormer1D,
+    CPCClassifier
 )
 
 # Import TaskTrainer
@@ -48,8 +49,26 @@ MODEL_TYPES = {
     'transformer': TransformerClassifier,
     'vit': ViTClassifier,
     'patchtst': PatchTST,
-    'timesformer1d': TimesFormer1D
+    'timesformer1d': TimesFormer1D,
+    'cpc': CPCClassifier
 }
+
+class CollateSkipNoneSupervised:
+    def __init__(self, win_len, feature_size):
+        self.win_len = win_len
+        self.feature_size = feature_size
+
+    def __call__(self, batch):
+        # filter out None samples
+        batch = [item for item in batch if item is not None]
+        
+        # if no samples remain after filtering, return empty tensors
+        if len(batch) == 0:
+            return torch.zeros(0, 1, self.win_len, self.feature_size), torch.zeros(0, dtype=torch.long)
+        
+        # use default collate function for the filtered batch
+        return torch.utils.data.dataloader.default_collate(batch)
+
 
 def main(args=None):
     if args is None:
@@ -59,7 +78,7 @@ def main(args=None):
         parser.add_argument('--task', type=str, default='MotionSourceRecognition',
                             help='Name of the task to train on')
         parser.add_argument('--model', type=str, default='vit', 
-                            choices=['mlp', 'lstm', 'resnet18', 'transformer', 'vit', 'patchtst', 'timesformer1d'],
+                            choices=list(MODEL_TYPES.keys()),
                             help='Type of model to train')
         parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
         parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
@@ -233,17 +252,8 @@ def main(args=None):
 
     print(f"Using test splits: {test_splits}")
 
-    # add handling for None values to prevent dataloader errors
-    def custom_collate_fn(batch):
-        # filter out None samples
-        batch = [item for item in batch if item is not None]
-        
-        # if no samples remain after filtering, return empty tensors
-        if len(batch) == 0:
-            return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0, dtype=torch.long)
-        
-        # use default collate function for the filtered batch
-        return torch.utils.data.dataloader.default_collate(batch)
+    # instantiate collate function to handle None values
+    custom_collate_fn = CollateSkipNoneSupervised(args.win_len, args.feature_size)
 
     if args.no_pin_memory:
         args.pin_memory = False
@@ -295,7 +305,7 @@ def main(args=None):
     model_kwargs = {"num_classes": num_classes}
 
     # add model-specific parameters
-    if args.model in ["mlp", "vit", "patchtst", "timesformer1d"]:
+    if args.model in ["mlp", "vit", "patchtst", "timesformer1d", "cpc"]:
         model_kwargs.update({"win_len": args.win_len, "feature_size": args.feature_size})
 
     # ResNet18 specific parameters:

@@ -19,12 +19,14 @@ from load.dataloader import get_loaders
 from load.dataset import CSIDataset
 from load.pretrain_dataset import PretrainDataset
 from engine.masked_trainer import MaskedTrainer
+from engine.cpc_trainer import CPCTrainer
 from utils.config import update_args_with_yaml, save_config
 from model.models import (
     MaskedLSTM,
     MaskedPatchTST,
     MaskedTimesFormer1D,
-    MaskedTransformer
+    MaskedTransformer,
+    CPCModel
 )
 
 # -------------------------------------------------
@@ -36,15 +38,30 @@ MODEL_TYPES = {
     "patchtst": MaskedPatchTST,
     "timesformer1d": MaskedTimesFormer1D,
     "transformer": MaskedTransformer,
+    "cpc": CPCModel,
 }
 
 # -------------------------------------------------
 # MAIN
 # -------------------------------------------------
 
+class CollateSkipNone:
+    def __init__(self, win_len, feature_size):
+        self.win_len = win_len
+        self.feature_size = feature_size
+
+    def __call__(self, batch):
+        batch = [b for b in batch if b is not None]
+        if len(batch) == 0:
+            return torch.zeros(0, 1, self.win_len, self.feature_size), torch.zeros(0), []
+        return torch.utils.data.dataloader.default_collate(batch)
+
 def main():
 
-    parser = argparse.ArgumentParser(description="Masked CSI Pretraining")
+    parser = argparse.ArgumentParser(description="Masked & CPC CSI Pretraining")
+
+    parser.add_argument("--pretrain_method", type=str, default="masked", choices=["masked", "cpc"],
+                        help="Pretraining method to use.")
 
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--task", type=str, default=None,
@@ -60,6 +77,7 @@ def main():
     parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--patience", type=int, default=20)
+    parser.add_argument("--cpc_k_steps", type=int, default=4, help="Number of steps for CPC future prediction")
 
     parser.add_argument("--win_len", type=int, default=500)
     parser.add_argument("--feature_size", type=int, default=232)
@@ -87,6 +105,9 @@ def main():
     # SEED
     # -------------------------------------------------
 
+    if args.pretrain_method == "cpc":
+        args.model = "cpc"
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     if torch.cuda.is_available():
@@ -112,7 +133,7 @@ def main():
     # DEVICE
     # -------------------------------------------------
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # -------------------------------------------------
@@ -328,7 +349,14 @@ def main():
     # TRAINER
     # -------------------------------------------------
 
-    trainer = MaskedTrainer(
+    if args.pretrain_method == "masked":
+        TrainerClass = MaskedTrainer
+    elif args.pretrain_method == "cpc":
+        TrainerClass = CPCTrainer
+    else:
+        raise ValueError(f"Unknown pretrain_method: {args.pretrain_method}")
+
+    trainer = TrainerClass(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -339,7 +367,7 @@ def main():
         config=args,
     )
 
-    print("\nStarting masked pretraining...\n")
+    print(f"\nStarting {args.pretrain_method} pretraining...\n")
 
     model, training_results = trainer.train()
 

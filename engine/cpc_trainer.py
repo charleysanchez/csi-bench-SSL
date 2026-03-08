@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
@@ -29,8 +30,8 @@ def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
     return LambdaLR(optimizer, lr_lambda)
 
 
-class MaskedTrainer(BaseTrainer):
-    """Trainer for masked self-supervised CSI pretraining."""
+class CPCTrainer(BaseTrainer):
+    """Trainer for Contrastive Predictive Coding (CPC) self-supervised CSI pretraining."""
 
     def __init__(
         self,
@@ -46,6 +47,7 @@ class MaskedTrainer(BaseTrainer):
         config=None,
         distributed=False,
         local_rank=0,
+        k_steps=4,
     ):
         self.model = model
         self.train_loader = train_loader
@@ -59,6 +61,7 @@ class MaskedTrainer(BaseTrainer):
         self.config = config
         self.distributed = distributed
         self.local_rank = local_rank
+        self.k_steps = getattr(config, "cpc_k_steps", k_steps)
 
         if not distributed or local_rank == 0:
             os.makedirs(save_path, exist_ok=True)
@@ -117,8 +120,6 @@ class MaskedTrainer(BaseTrainer):
             self.train_losses.append(train_loss)
             self.val_losses.append(val_loss)
 
-            # step scheduler is now done per batch in train_epoch()
-
             if not self.distributed or self.local_rank == 0:
                 print(f"Train Loss: {train_loss:.6f}")
                 print(f"Val Loss:   {val_loss:.6f}")
@@ -175,9 +176,13 @@ class MaskedTrainer(BaseTrainer):
         total_time = 0.0
 
         loader = tqdm(self.train_loader, leave=False)
-        first = True
         for batch in loader:
             inputs = batch[0]
+            if len(batch) > 2:
+                users = batch[2]
+            else:
+                users = None
+                
             if inputs.size(0) == 0:
                 continue
 
@@ -189,23 +194,16 @@ class MaskedTrainer(BaseTrainer):
             B = inputs.size(0)
             total_samples += B
 
-            masked_inputs, mask = self.apply_mask(inputs)
-
-            if first and self.current_epoch == 0:
-                self.visualize_mask(inputs, masked_inputs, mask)
-                first = False
-
             self.optimizer.zero_grad()
-            outputs = self.model(masked_inputs)
-            targets = inputs.squeeze(1)
-            mask_sq = mask.squeeze(1)
-
-            loss = self.compute_masked_loss(outputs, targets, mask_sq)
+            
+            outputs = self.model(inputs)
+            
+            loss = self.compute_cpc_loss(outputs, self.k_steps, users)
+            
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
-            # step scheduler per batch (step-level cosine warmup)
             self.scheduler.step()
 
             total_loss += loss.item() * B
@@ -216,7 +214,6 @@ class MaskedTrainer(BaseTrainer):
         if total_samples == 0:
             return 0.0, 0.0
 
-        # Distributed reduction
         if self.distributed and torch.distributed.is_initialized():
             metrics = torch.tensor(
                 [total_loss, total_time, total_samples],
@@ -248,6 +245,11 @@ class MaskedTrainer(BaseTrainer):
         with torch.no_grad():
             for batch in loader:
                 inputs = batch[0]
+                if len(batch) > 2:
+                    users = batch[2]
+                else:
+                    users = None
+
                 if inputs.size(0) == 0:
                     continue
 
@@ -257,12 +259,8 @@ class MaskedTrainer(BaseTrainer):
                 B = inputs.size(0)
                 total_samples += B
 
-                masked_inputs, mask = self.apply_mask(inputs)
-                outputs = self.model(masked_inputs)
-                targets = inputs.squeeze(1)
-                mask_sq = mask.squeeze(1)
-
-                loss = self.compute_masked_loss(outputs, targets, mask_sq)
+                outputs = self.model(inputs)
+                loss = self.compute_cpc_loss(outputs, self.k_steps, users)
 
                 total_loss += loss.item() * B
 
@@ -292,7 +290,7 @@ class MaskedTrainer(BaseTrainer):
         plt.plot(self.val_losses, label="Validation")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
-        plt.title("Masked Pretraining Loss")
+        plt.title("CPC Pretraining Loss")
         plt.legend()
         plt.grid(True)
 
@@ -300,67 +298,85 @@ class MaskedTrainer(BaseTrainer):
         plt.close()
 
     # -------------------------------------------------
-    # MASKING
+    # CPC LOSS
     # -------------------------------------------------
 
-    def apply_mask(self, inputs, patch_size_t=16, patch_size_f=16, mask_ratio=0.75):
-        B, C, T, F = inputs.shape
-        device = inputs.device
-
-        n_t = T // patch_size_t
-        n_f = F // patch_size_f
-        num_patches = n_t * n_f
-
-        # Create random mask per batch (patch-level)
-        noise = torch.rand(B, num_patches, device=device)
-        ids_shuffle = torch.argsort(noise, dim=1)
-
-        num_mask = int(mask_ratio * num_patches)
-
-        patch_mask = torch.zeros(B, num_patches, device=device)
-        patch_mask.scatter_(1, ids_shuffle[:, :num_mask], 1)
-
-        # Expand to pixel-level mask
-        patch_mask = patch_mask.view(B, n_t, n_f)
-
-        mask = patch_mask.repeat_interleave(patch_size_t, dim=1)
-        mask = mask.repeat_interleave(patch_size_f, dim=2)
-
-        mask = mask.unsqueeze(1)  # (B, 1, T', F')
-
-        # If T or F not divisible, pad mask
-        full_mask = torch.zeros(B, 1, T, F, device=device)
-        full_mask[:, :, :mask.shape[2], :mask.shape[3]] = mask
-
-        masked_inputs = inputs * (1 - full_mask)
-
-        return masked_inputs, full_mask
-
-    def compute_masked_loss(self, outputs, targets, mask):
-        diff = (outputs - targets) ** 2
-        loss = (diff * mask).sum() / (mask.sum() + 1e-8)
-        return loss
-
-    def visualize_mask(self, inputs, masked_inputs, mask, sample_idx=0):
+    def compute_cpc_loss(self, outputs, k_steps=None, users=None):
         """
-        Visualize original, masked, and mask for one sample.
-        Assumes (B, C, T, F) and C=1 for plotting.
+        Compute InfoNCE loss for CPC.
+        We rely on randomized negative sampling across the batch and time dimensions.
+        This provides temporal negative diversity without the massive memory accumulation 
+        and quadratic overhead of O(B^2 * T^2) all-to-all comparisons.
         """
-
-        original = inputs[sample_idx, 0].detach().cpu()
-        masked = masked_inputs[sample_idx, 0].detach().cpu()
-        mask_img = mask[sample_idx, 0].detach().cpu()
-
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
-        axes[0].imshow(original, aspect="auto", origin="lower")
-        axes[0].set_title("Original CSI")
-
-        axes[1].imshow(masked, aspect="auto", origin="lower")
-        axes[1].set_title("Masked CSI")
-
-        axes[2].imshow(mask_img, aspect="auto", origin="lower")
-        axes[2].set_title("Mask (1 = masked)")
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.save_path, "mask_visualization.png"))
+        if k_steps is None:
+            k_steps = getattr(self.config, "cpc_k_steps", self.k_steps)
+            
+        z, c, preds = outputs
+        B, T, feat_dim = z.shape
+        
+        loss = 0.0
+        
+        # Pre-compute user mappings outside the loop
+        if users is not None:
+            # Check edge case: The entire batch is from a single user
+            if len(set(users)) <= 1:
+                # Fallback: treat each sequence in the batch as an independent identity
+                user_ids = torch.arange(B, device=self.device)
+            else:
+                user_to_id = {u: i for i, u in enumerate(set(users))}
+                user_ids = torch.tensor([user_to_id[u] for u in users], device=self.device)
+        else:
+            user_ids = torch.arange(B, device=self.device)
+            
+        # We will use random negative sampling to get cross-time negatives
+        # num_negatives determines how many random negatives to draw from the flattened N pool.
+        num_negatives = getattr(self.config, "cpc_num_negatives", 256)
+        
+        for k in range(1, k_steps + 1):
+            if T - k <= 0:
+                continue
+                
+            # z_t_k is the true target vector at time t+k
+            z_t_k = z[:, k:, :] # [B, T-k, feat_dim]
+            
+            # c_t_pred is the predicted target from time t using W_k
+            c_t_pred = preds[k - 1][:, :-k, :] # [B, T-k, feat_dim]
+            
+            c_flat = c_t_pred.flatten(0, 1) # [N, d]
+            z_flat = z_t_k.flatten(0, 1) # [N, d]
+            
+            # Normalize embeddings for cosine similarity
+            c_norm = F.normalize(c_flat, dim=-1)
+            z_norm = F.normalize(z_flat, dim=-1)
+            
+            N = c_flat.shape[0]
+            K_neg = min(num_negatives, N)
+            
+            # Randomly sample K_neg indices for the shared negative pool
+            neg_idx = torch.randperm(N, device=self.device)[:K_neg]
+            z_neg = z_norm[neg_idx] # [K_neg, d]
+            
+            # Calculate positive pairs (diagonal equivalent)
+            tau = 0.1
+            sim_pos = (c_norm * z_norm).sum(dim=-1, keepdim=True) / tau # [N, 1]
+            
+            # Calculate negative pairs
+            sim_neg = torch.matmul(c_norm, z_neg.T) / tau # [N, K_neg]
+            
+            # Mask out negatives that come from the same user context
+            user_ids_flat = user_ids.repeat_interleave(T - k) # [N]
+            neg_users = user_ids_flat[neg_idx] # [K_neg]
+            
+            mask = (user_ids_flat.unsqueeze(1) == neg_users.unsqueeze(0)) # [N, K_neg]
+            sim_neg.masked_fill_(mask, -float('inf'))
+            
+            # Concatenate positives and negatives
+            logits = torch.cat([sim_pos, sim_neg], dim=1) # [N, 1 + K_neg]
+            
+            # Target is always index 0
+            step_labels = torch.zeros(N, dtype=torch.long, device=self.device)
+            
+            step_loss = F.cross_entropy(logits, step_labels)
+            loss += step_loss
+            
+        return loss / max(1, k_steps)
