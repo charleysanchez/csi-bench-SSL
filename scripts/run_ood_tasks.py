@@ -7,11 +7,45 @@ import sys
 import glob
 import numpy as np
 
+import argparse
+from pathlib import Path
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run multi-seed evaluation on OOD tasks.")
+    parser.add_argument("--config", type=str, default="configs/paper_low_lr.yaml", help="Path to config file")
+    parser.add_argument("--model", type=str, default=None, help="Model name. If not provided, derived from encoder path.")
+    parser.add_argument("--encoder", type=str, default=None, help="Path to encoder_weights.pt file.")
+    parser.add_argument("--pretrain_dir", type=str, default="pretrain_results", help="Directory to search for the latest encoder weights if --encoder is not provided")
+    return parser.parse_args()
+
+args = parse_args()
+
+CONFIG = args.config
+
+if args.encoder:
+    ENCODER = args.encoder
+else:
+    search_pattern = os.path.join(args.pretrain_dir, "**", "encoder_weights*.pt")
+    encoder_files = glob.glob(search_pattern, recursive=True)
+    if not encoder_files:
+        print(f"Error: No encoder weights found in {args.pretrain_dir}")
+        sys.exit(1)
+    ENCODER = max(encoder_files, key=os.path.getmtime)
+    print(f"Found latest encoder: {ENCODER}")
+
+MODEL = args.model
+if not MODEL:
+    # Try to derive from encoder path, usually pretrain_results/task/model_name/hash/encoder_weights.pt
+    parts = Path(ENCODER).parts
+    if len(parts) >= 3:
+        MODEL = parts[-3]
+        print(f"Derived model name '{MODEL}' from encoder path.")
+    else:
+        MODEL = "timesformer1d"
+        print(f"Could not derive model name, defaulting to {MODEL}.")
+
 # Configuration
 SEEDS = [42, 43, 44]  # 3 seeds for speed
-CONFIG = "configs/paper_low_lr.yaml"
-ENCODER = "pretrain_results/all_tasks/timesformer1d/fe5af1b0dc/encoder_weights.pt"
-MODEL = "timesformer1d"
 TASKS = ["HumanActivityRecognition", "HumanIdentification", "ProximityRecognition"]
 
 all_results = {}
