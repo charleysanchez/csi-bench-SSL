@@ -302,6 +302,14 @@ def main():
             'num_heads': getattr(args, 'num_heads', 4),
             'dropout': getattr(args, 'dropout', 0.1)
         })
+    
+    elif args.model == 'cpc':
+        model_kwargs.update({
+            'win_len': args.win_len,
+            'feature_size': args.feature_size,
+            # Using getattr for safety in case it isn't in the YAML yet
+            'cpc_k_steps': getattr(args, 'cpc_k_steps', 12) 
+        })
 
     print(f"Creating {args.model} model with kwargs: {model_kwargs}")
     model = ModelClass(**model_kwargs)
