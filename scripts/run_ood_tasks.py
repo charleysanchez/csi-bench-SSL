@@ -16,55 +16,42 @@ from scripts.train_supervised import MODEL_TYPES
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run multi-seed evaluation on OOD tasks.")
-    parser.add_argument("--config", type=str, default="configs/paper_low_lr.yaml", help="Path to config file")
-    parser.add_argument("--model", type=str, default=None, help="Model name. If not provided, derived from encoder path.")
     parser.add_argument("--encoder", type=str, default=None, help="Path to encoder_weights.pt file.")
-    parser.add_argument("--pretrain_dir", type=str, default="pretrain_results", help="Directory to search for the latest encoder weights if --encoder is not provided")
+    parser.add_argument("--epochs", type=int, default=1, help="Number of epochs to train for.")
     return parser.parse_args()
 
 args = parse_args()
 
-CONFIG = args.config
-
-if args.encoder:
-    if os.path.isdir(args.encoder):
-        search_pattern = os.path.join(args.encoder, "**", "*.pt")
-        encoder_files = glob.glob(search_pattern, recursive=True)
-        if not encoder_files:
-            print(f"Error: No .pt files found in directory {args.encoder}")
-            sys.exit(1)
-        ENCODER = max(encoder_files, key=os.path.getmtime)
-        print(f"Directory passed to --encoder. Automatically found latest encoder weights: {ENCODER}")
-    else:
-        ENCODER = args.encoder
-else:
-    search_pattern = os.path.join(args.pretrain_dir, "**", "encoder_weights*.pt")
+if os.path.isdir(args.encoder):
+    search_pattern = os.path.join(args.encoder, "**", "*.pt")
     encoder_files = glob.glob(search_pattern, recursive=True)
     if not encoder_files:
-        print(f"Error: No encoder weights found in {args.pretrain_dir}")
+        print(f"Error: No .pt files found in directory {args.encoder}")
         sys.exit(1)
     ENCODER = max(encoder_files, key=os.path.getmtime)
-    print(f"Found latest encoder: {ENCODER}")
+    dir_name = os.path.dirname(ENCODER)
+    CONFIG = os.path.join(dir_name, "config.yaml")
+    print(f"Directory passed to --encoder. Automatically found latest encoder weights: {ENCODER}")
+else:
+    ENCODER = args.encoder
 
-MODEL = args.model
-if not MODEL:
-    valid_models = list(MODEL_TYPES.keys())
-    parts = Path(ENCODER).parts
-    
-    # Check if any part of the path matches a valid model name
-    for part in reversed(parts):
-        if part in valid_models:
-            MODEL = part
-            break
-            
-    if MODEL:
-        print(f"Derived model name '{MODEL}' from encoder path.")
-    elif len(parts) >= 3:
-        MODEL = parts[-3]
-        print(f"Derived model name '{MODEL}' from encoder path (fallback).")
-    else:
-        MODEL = "timesformer1d"
-        print(f"Could not derive model name, defaulting to {MODEL}.")
+valid_models = list(MODEL_TYPES.keys())
+parts = Path(ENCODER).parts
+
+# Check if any part of the path matches a valid model name
+for part in reversed(parts):
+    if part in valid_models:
+        MODEL = part
+        break
+        
+if MODEL:
+    print(f"Derived model name '{MODEL}' from encoder path.")
+elif len(parts) >= 3:
+    MODEL = parts[-3]
+    print(f"Derived model name '{MODEL}' from encoder path (fallback).")
+else:
+    MODEL = "timesformer1d"
+    print(f"Could not derive model name, defaulting to {MODEL}.")
 
 # Configuration
 SEEDS = [42, 43, 44]  # 3 seeds for speed
@@ -97,6 +84,7 @@ for task in TASKS:
             "--output_dir", "results",
             "--num_workers", "8",
             "--seed", str(seed),
+            "--epochs", str(args.epochs),
         ]
         
         result = subprocess.run(cmd, text=True)
