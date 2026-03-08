@@ -189,6 +189,8 @@ class CPCTrainer(BaseTrainer):
             start_time = time.perf_counter()
 
             inputs = inputs.to(self.device)
+            if inputs.dim() == 3:
+                inputs = inputs.unsqueeze(1)
             B = inputs.size(0)
             total_samples += B
 
@@ -252,6 +254,8 @@ class CPCTrainer(BaseTrainer):
                     continue
 
                 inputs = inputs.to(self.device)
+                if inputs.dim() == 3:
+                    inputs = inputs.unsqueeze(1)
                 B = inputs.size(0)
                 total_samples += B
 
