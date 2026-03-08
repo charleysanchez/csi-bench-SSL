@@ -123,7 +123,25 @@ def main():
         batch = [b for b in batch if b is not None]
         if len(batch) == 0:
             return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0)
-        return torch.utils.data.dataloader.default_collate(batch)
+            
+        collated = torch.utils.data.dataloader.default_collate(batch)
+        
+        # Check if the dataset returned (inputs, labels)
+        if isinstance(collated, (list, tuple)):
+            inputs = collated[0]
+            # If [Batch, Time, Features], add the dummy Channel dimension
+            if len(inputs.shape) == 3: 
+                inputs = inputs.unsqueeze(1) # -> [Batch, 1, Time, Features]
+            
+            # Reconstruct and return the tuple
+            return (inputs,) + tuple(collated[1:])
+            
+        # Check if the dataset returned just inputs
+        else:
+            inputs = collated
+            if len(inputs.shape) == 3:
+                inputs = inputs.unsqueeze(1)
+            return inputs
 
     # -------------------------------------------------
     # LOAD DATA
@@ -135,7 +153,7 @@ def main():
         task_dirs = sorted([
             d for d in os.listdir(args.data_dir)
             if os.path.isdir(os.path.join(args.data_dir, d))
-            and d not in ["RawContinuousRecording", "ProximityRecognition", "Localization"]
+            and d not in ["RawContinuousRecording"]#, "ProximityRecognition", "Localization"]
         ])
         print(f"Found tasks: {task_dirs}")
 
@@ -223,11 +241,49 @@ def main():
     # -------------------------------------------------
 
     ModelClass = MODEL_TYPES[args.model]
+    
+    model_kwargs = {}
 
-    model = ModelClass(
-        win_len=args.win_len,
-        feature_size=args.feature_size,
-    )
+    # Map parameters to model_kwargs based on model type
+    if args.model == 'lstm':
+        model_kwargs.update({'feature_size': args.feature_size})
+        
+    elif args.model == 'transformer':
+        # Transformers usually take d_model/emb_dim, dropout, etc.
+        model_kwargs.update({
+            'feature_size': args.feature_size,
+            'd_model': getattr(args, 'emb_dim', getattr(args, 'd_model', 128)),
+            'dropout': getattr(args, 'dropout', 0.1)
+        })
+        # Add these if your MaskedTransformer specifically expects them
+        if hasattr(args, 'num_heads'): model_kwargs['nhead'] = args.num_heads
+        if hasattr(args, 'depth'): model_kwargs['num_layers'] = args.depth
+        
+    elif args.model == 'patchtst':
+        model_kwargs.update({
+            'win_len': args.win_len,
+            'feature_size': args.feature_size,
+            'patch_len': getattr(args, 'patch_len', 16),
+            'stride': getattr(args, 'stride', 8),
+            'emb_dim': getattr(args, 'emb_dim', 128),
+            'depth': getattr(args, 'depth', 4),
+            'num_heads': getattr(args, 'num_heads', 4),
+            'dropout': getattr(args, 'dropout', 0.1)
+        })
+        
+    elif args.model == 'timesformer1d':
+        model_kwargs.update({
+            'win_len': args.win_len,
+            'feature_size': args.feature_size,
+            'patch_size': getattr(args, 'patch_size', 4),
+            'emb_dim': getattr(args, 'emb_dim', 128),
+            'depth': getattr(args, 'depth', 4),
+            'num_heads': getattr(args, 'num_heads', 4),
+            'dropout': getattr(args, 'dropout', 0.1)
+        })
+
+    print(f"Creating {args.model} model with kwargs: {model_kwargs}")
+    model = ModelClass(**model_kwargs)
 
     model = model.to(device)
 

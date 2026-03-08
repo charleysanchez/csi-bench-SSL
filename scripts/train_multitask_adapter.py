@@ -679,13 +679,13 @@ def main():
             val_loader=val_loaders[task],
             test_loader=None,
             criterion=criterion,
-            optimizer=None,
+            optimizer=optimizer,
             scheduler=None,
             device=device,
             save_path=task_dir,
             num_classes=task_classes[task],
             label_mapper=val_loaders[task].dataset.label_mapper,
-            config=None
+            config=args
         )
         tm.plot_confusion_matrix(data_loader=val_loaders[task], epoch=best_metrics[task]['best_epoch'], mode='val_best')
         
