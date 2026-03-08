@@ -897,6 +897,64 @@ class CausalConv1d(nn.Module):
         return self.conv(x)
 
 
+class CPCClassifier(nn.Module):
+    """Classifier using CPC's feature encoder (g_enc) and autoregressive model (g_ar)"""
+    def __init__(self, feature_size=232, hidden_size=256, num_classes=2, win_len=None):
+        super().__init__()
+        self.feature_size = feature_size
+        self.hidden_size = hidden_size
+        self.num_classes = num_classes
+        self.win_len = win_len
+        
+        self.g_enc = nn.Sequential(
+            CausalConv1d(feature_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            CausalConv1d(hidden_size, hidden_size, kernel_size=3),
+            nn.BatchNorm1d(hidden_size),
+            nn.ReLU(inplace=True),
+        )
+
+        self.g_ar = nn.GRU(
+            input_size=hidden_size,
+            hidden_size=hidden_size,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False # Strictly causal
+        )
+        
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(hidden_size, num_classes)
+        )
+        
+    def get_init_params(self):
+        return {
+            'feature_size': self.feature_size,
+            'hidden_size': self.hidden_size,
+            'num_classes': self.num_classes,
+            'win_len': self.win_len
+        }
+        
+    def forward(self, x):
+        if x.dim() == 4:
+            x = x.squeeze(1)
+            
+        x = x.transpose(1, 2)
+        z = self.g_enc(x)
+        z = z.transpose(1, 2)
+        
+        c, _ = self.g_ar(z)
+        
+        # Take the last hidden state of the GRU for classification
+        hidden = c[:, -1, :]
+        
+        return self.fc(hidden)
+
+
 class CPCModel(nn.Module):
     """
     Contrastive Predictive Coding (CPC) Model.

@@ -10,6 +10,10 @@ import numpy as np
 import argparse
 from pathlib import Path
 
+# Add the project root directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.train_supervised import MODEL_TYPES
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run multi-seed evaluation on OOD tasks.")
     parser.add_argument("--config", type=str, default="configs/paper_low_lr.yaml", help="Path to config file")
@@ -23,7 +27,16 @@ args = parse_args()
 CONFIG = args.config
 
 if args.encoder:
-    ENCODER = args.encoder
+    if os.path.isdir(args.encoder):
+        search_pattern = os.path.join(args.encoder, "**", "*.pt")
+        encoder_files = glob.glob(search_pattern, recursive=True)
+        if not encoder_files:
+            print(f"Error: No .pt files found in directory {args.encoder}")
+            sys.exit(1)
+        ENCODER = max(encoder_files, key=os.path.getmtime)
+        print(f"Directory passed to --encoder. Automatically found latest encoder weights: {ENCODER}")
+    else:
+        ENCODER = args.encoder
 else:
     search_pattern = os.path.join(args.pretrain_dir, "**", "encoder_weights*.pt")
     encoder_files = glob.glob(search_pattern, recursive=True)
@@ -35,11 +48,20 @@ else:
 
 MODEL = args.model
 if not MODEL:
-    # Try to derive from encoder path, usually pretrain_results/task/model_name/hash/encoder_weights.pt
+    valid_models = list(MODEL_TYPES.keys())
     parts = Path(ENCODER).parts
-    if len(parts) >= 3:
-        MODEL = parts[-3]
+    
+    # Check if any part of the path matches a valid model name
+    for part in reversed(parts):
+        if part in valid_models:
+            MODEL = part
+            break
+            
+    if MODEL:
         print(f"Derived model name '{MODEL}' from encoder path.")
+    elif len(parts) >= 3:
+        MODEL = parts[-3]
+        print(f"Derived model name '{MODEL}' from encoder path (fallback).")
     else:
         MODEL = "timesformer1d"
         print(f"Could not derive model name, defaulting to {MODEL}.")
