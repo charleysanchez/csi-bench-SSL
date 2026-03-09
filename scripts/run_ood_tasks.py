@@ -18,6 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run multi-seed evaluation on OOD tasks.")
     parser.add_argument("--encoder", type=str, default=None, help="Path to encoder_weights.pt file.")
     parser.add_argument("--epochs", type=int, default=1, help="Number of epochs to train for.")
+    parser.add_argument("--pipeline", type=str, default="supervised", help="Choose either 'multitask' or 'supervised' training approach.")
     return parser.parse_args()
 
 args = parse_args()
@@ -72,18 +73,32 @@ for task in TASKS:
         print(f"  {task} - SEED {seed} ({i+1}/{len(SEEDS)})")
         print(f"{'-'*60}\n")
         
-        cmd = [
-            sys.executable, "-u", "scripts/train_supervised.py",
-            "--task", task,
-            "--model", MODEL,
-            "--pretrained_encoder", ENCODER,
-            "--config", CONFIG,
-            "--save_dir", "results",
-            "--output_dir", "results",
-            "--num_workers", "8",
-            "--seed", str(seed),
-            "--epochs", str(args.epochs),
-        ]
+        if args.pipeline == 'supervised':
+            cmd = [
+                sys.executable, "-u", "scripts/train_supervised.py",
+                "--task", task,
+                "--model", MODEL,
+                "--pretrained_encoder", ENCODER,
+                "--config", CONFIG,
+                "--save_dir", "results",
+                "--output_dir", "results",
+                "--num_workers", "8",
+                "--seed", str(seed),
+                "--epochs", str(args.epochs),
+            ]
+        elif args.pipeline == 'multitask':
+            cmd = [
+                sys.executable, "-u", "scripts/train_multitask_adapter.py",
+                "--tasks", task,
+                "--model", MODEL,
+                "--pretrained_encoder", ENCODER,
+                "--config", CONFIG,
+                "--save_dir", "results",
+                "--output_dir", "results",
+                "--num_workers", "8",
+                "--seed", str(seed),
+                "--epochs", str(args.epochs),
+            ]
         
         result = subprocess.run(cmd, text=True)
         

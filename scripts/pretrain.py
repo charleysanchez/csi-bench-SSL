@@ -45,16 +45,6 @@ MODEL_TYPES = {
 # MAIN
 # -------------------------------------------------
 
-class CollateSkipNone:
-    def __init__(self, win_len, feature_size):
-        self.win_len = win_len
-        self.feature_size = feature_size
-
-    def __call__(self, batch):
-        batch = [b for b in batch if b is not None]
-        if len(batch) == 0:
-            return torch.zeros(0, 1, self.win_len, self.feature_size), torch.zeros(0), []
-        return torch.utils.data.dataloader.default_collate(batch)
 
 def main():
 
