@@ -34,7 +34,6 @@ if os.path.isdir(args.encoder):
     print(f"Directory passed to --encoder. Automatically found latest encoder weights: {ENCODER}")
 else:
     ENCODER = args.encoder
-
 valid_models = list(MODEL_TYPES.keys())
 parts = Path(ENCODER).parts
 
@@ -56,7 +55,6 @@ else:
 # Configuration
 SEEDS = [42, 43, 44]  # 3 seeds for speed
 TASKS = ["HumanActivityRecognition", "HumanIdentification", "ProximityRecognition"]
-
 all_results = {}
 
 for task in TASKS:

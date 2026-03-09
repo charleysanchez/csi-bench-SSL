@@ -162,13 +162,23 @@ def main(args=None):
                     help='Path to pretrained encoder weights (.pt file)')
         parser.add_argument('--config', type=str, default=None,
                     help='Path to YAML config file to override args')
+        parser.add_argument('--experiment_id', type=str, default=None,
+                    help='Pass experiment id if already done in pretraining')
         
         args = parser.parse_args()
+
+    cli_task = args.task
+    cli_seed = args.seed
 
     # Override args with YAML config if provided
     if args.config is not None:
         args = update_args_with_yaml(args, args.config)
     
+    if cli_task is not None:
+        args.task = cli_task
+    if cli_seed is not None:
+        args.seed = cli_seed
+        
     # set output directory if not specified
     if args.output_dir is None:
         args.output_dir = args.save_dir
@@ -199,6 +209,7 @@ def main(args=None):
 
     # use specified directories for local environment with task/model/experiment structure
     # directory structure: save_dir/task/model/experiment_id
+    print(args.output_dir, args.task, args.model, experiment_id)
     results_dir = os.path.join(args.output_dir, args.task, args.model, experiment_id)
     os.makedirs(results_dir, exist_ok=True)
     # create checkpoints directory too
