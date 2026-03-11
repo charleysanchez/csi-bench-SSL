@@ -224,6 +224,7 @@ class MultiTaskAdapterModel(nn.Module):
         logits = self.heads[self.active_task](features)
         
         return logits
+    
 
 
 class PatchTSTTaskAdapters(nn.Module):
@@ -296,6 +297,7 @@ class PatchTSTTaskAdapters(nn.Module):
         output = adapters["output"](hidden_states)
         
         return output
+    
 
 
 class PatchTSTAdapterModel(nn.Module):
@@ -374,6 +376,7 @@ class PatchTSTAdapterModel(nn.Module):
         logits = self.heads[self.active_task](features)
         
         return logits
+    
 
 
 class TimesFormerTaskAdapters(nn.Module):
@@ -533,3 +536,4 @@ class TimesFormerAdapterModel(nn.Module):
         logits = self.heads[self.active_task](features)
         
         return logits
+    

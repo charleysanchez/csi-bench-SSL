@@ -91,7 +91,7 @@ def main(args=None):
                             help='Directory to save results (defaults to save_dir if not specified)')
         parser.add_argument('--weight_decay', type=float, default=1e-5, 
                             help='Weight decay for optimizer')
-        parser.add_argument('--warmup_epochs', type=int, default=5,
+        parser.add_argument('--warmup_epochs', type=int, default=10,
                             help='Number of warmup epochs')
         parser.add_argument('--patience', type=int, default=15,
                             help='Patience for early stopping')
@@ -384,12 +384,29 @@ def main(args=None):
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
 
-    # setup optimizer and loss function
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay
-    )
+    # ---------------------------------------------------------
+    # DIFFERENTIAL LEARNING RATES
+    # ---------------------------------------------------------
+    head_params = []
+    backbone_params = []
+    
+    # Sort parameters based on whether they belong to the new head or the pretrained backbone
+    for name, param in model.named_parameters():
+        if 'classifier' in name or 'head' in name or 'fc' in name:
+            head_params.append(param)
+        else:
+            backbone_params.append(param)
+
+    # Give the head the full learning rate, and the backbone a 10x smaller learning rate
+    optimizer = torch.optim.AdamW([
+        {'params': backbone_params, 'lr': args.learning_rate * 0.1},
+        {'params': head_params, 'lr': args.learning_rate}
+    ], weight_decay=args.weight_decay)
+    
+    print("Optimizer initialized with Differential LRs:")
+    print(f"  - Head LR: {args.learning_rate}")
+    print(f"  - Backbone LR: {args.learning_rate * 0.1}")
+    # ---------------------------------------------------------
 
     criterion = nn.CrossEntropyLoss()
 

@@ -3,6 +3,8 @@ import yaml
 import argparse
 from typing import Dict, Any
 
+import sys
+
 def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.Namespace:
     """Read a YAML config and update the argparse namespace."""
     if not os.path.exists(yaml_path):
@@ -15,24 +17,42 @@ def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.
         return args
         
     # Flatten the config to update arguments.
-    # Prioritizes CLI arguments if they were specifically provided, 
-    # but for simplicity we directly update args from config keys.
     flat_config = {}
     for section_name, section_dict in config.items():
         if isinstance(section_dict, dict):
-            # Special handling for common sections like optimizer, scheduler, model_params, training
             for k, v in section_dict.items():
                 if k == "name" and section_name in ["optimizer", "scheduler"]:
                     flat_config[section_name] = v
                 else:
                     flat_config[k] = v
+                    # Handle common aliases automatically
+                    if k == "lr":
+                        flat_config["learning_rate"] = v
+                    elif k == "learning_rate":
+                        flat_config["lr"] = v
         else:
             flat_config[section_name] = section_dict
+
+    # Identify which arguments were explicitly provided in the command line
+    cli_args = []
+    for arg in sys.argv:
+        if arg.startswith('--'):
+            cli_args.append(arg.lstrip('-').split('=')[0])
             
     # Update args
     for k, v in flat_config.items():
+        # 1. COMMAND LINE WINS: Skip if we explicitly passed this flag in the terminal
+        if k in cli_args:
+            continue
+            
+        # 2. Check if the argument exists in the parser
         if hasattr(args, k):
             existing_v = getattr(args, k)
+            
+            # FIX THE BRACKETS: Safely convert YAML lists to comma-separated strings
+            if isinstance(v, list) and isinstance(existing_v, str):
+                v = ",".join(str(x) for x in v)
+
             if existing_v is not None and v is not None:
                 try:
                     # Special case for booleans
@@ -45,8 +65,15 @@ def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.
                         v = type(existing_v)(v)
                 except (ValueError, TypeError):
                     pass
-        setattr(args, k, v)
-        
+            setattr(args, k, v)
+        else:
+            # 3. OVERRIDE: If the parser didn't know about this argument, 
+            # inject it into the namespace anyway so the model can access it!
+            if isinstance(v, list):
+                # If it's a list that needs to act like a CLI string, convert it
+                v = ",".join(str(x) for x in v)
+            setattr(args, k, v)
+            
     return args
 
 def save_config(args: argparse.Namespace, save_path: str) -> None:

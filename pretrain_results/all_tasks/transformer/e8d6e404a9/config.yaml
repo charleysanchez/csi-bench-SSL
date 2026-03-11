@@ -1,24 +1,27 @@
 training:
-  batch_size: 32
+  batch_size: 128
   epochs: 100
   warmup_epochs: 5
-  patience: 20
+  patience: 15
 model_params:
   win_len: 500
   feature_size: 232
+  emb_dim: 256
+  num_heads: 8
+  depth: 4
+  dropout: 0.1
 optimizer:
   lr: 0.001
   weight_decay: 1.0e-05
-  name: adamw
-scheduler:
-  name: warmup_cosine
 general:
+  pretrain_method: masked
   data_dir: data
-  task: FallDetection
-  model: timesformer1d
+  task: null
+  all_tasks: true
+  model: transformer
+  cpc_k_steps: 4
   save_dir: pretrain_results
   seed: 42
   num_workers: 8
   pin_memory: false
-  config: configs/pretrain.yaml
-  min_lr_ratio: 0.0
+  config: configs/pretrain_transformer.yaml

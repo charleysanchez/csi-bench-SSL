@@ -1014,3 +1014,4 @@ class CPCModel(nn.Module):
             preds.append(self.W_k[k](c))
             
         return z, c, preds
+

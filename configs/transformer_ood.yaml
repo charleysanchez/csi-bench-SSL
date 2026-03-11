@@ -1,0 +1,41 @@
+# General Pipeline Settings
+pipeline: "supervised"
+training_dir: "data/"
+output_dir: "results/"
+task: "HumanActivityRecognition"
+available_models: ["transformer"]
+
+# Training Protocol (Matches Section B.3)
+training:
+  epochs: 100
+  patience: 15
+  batch_size: 128
+  num_workers: 8
+
+# Optimizer Settings (Matches Section B.3)
+optimizer:
+  name: "adamw"
+  lr: 0.001
+  weight_decay: 1e-5
+
+# Learning Rate Scheduler (Matches Section B.3)
+scheduler:
+  name: "warmup_cosine"
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+# Architecture & Adapter Settings (Matches Section B.1 & B.2)
+model_params:
+  # Transformer Backbone Configuration
+  win_len: 500
+  feature_size: 232
+  emb_dim: 256       # Paper: model dimension=256
+  depth: 4           # Paper: 4 layers
+  num_heads: 8       # Paper: 8 attention heads
+  dropout: 0.1       # Paper: dropout is set to 0.1
+  d_model: 256
+  
+  # LoRA Adapter Configuration
+  lora_r: 8          # Paper: rank=8
+  lora_alpha: 32     # Paper: alpha=32
+  lora_dropout: 0.05 # Paper: dropout=0.05

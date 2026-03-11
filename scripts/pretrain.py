@@ -81,6 +81,11 @@ def main():
     parser.add_argument("--config", type=str, default=None,
                         help="Path to YAML config file to override args")
 
+    parser.add_argument("--emb_dim", type=int, default=256, help="Model embedding dimension (d_model)")
+    parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads")
+    parser.add_argument("--depth", type=int, default=4, help="Number of transformer layers")
+    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+
     args = parser.parse_args()
 
     # require either --task or --all_tasks
@@ -164,7 +169,7 @@ def main():
         task_dirs = sorted([
             d for d in os.listdir(args.data_dir)
             if os.path.isdir(os.path.join(args.data_dir, d))
-            and d not in ["RawContinuousRecording"]#, "ProximityRecognition", "Localization"]
+            and d not in ["RawContinuousRecording", "ProximityRecognition", "HumanIdentification", "HumanActivityRecognition"]
         ])
         print(f"Found tasks: {task_dirs}")
 
@@ -261,10 +266,14 @@ def main():
         
     elif args.model == 'transformer':
         # Transformers usually take d_model/emb_dim, dropout, etc.
+        m_params = getattr(args, 'model_params', {})
+        
         model_kwargs.update({
-            'feature_size': args.feature_size,
-            'd_model': getattr(args, 'emb_dim', getattr(args, 'd_model', 128)),
-            'dropout': getattr(args, 'dropout', 0.1)
+            'feature_size': m_params.get('feature_size', args.feature_size),
+            'd_model': m_params.get('emb_dim', getattr(args, 'emb_dim', 128)),
+            'nhead': m_params.get('num_heads', getattr(args, 'num_heads', 8)),
+            'num_layers': m_params.get('depth', getattr(args, 'depth', 4)),
+            'dropout': m_params.get('dropout', getattr(args, 'dropout', 0.1))
         })
         # Add these if your MaskedTransformer specifically expects them
         if hasattr(args, 'num_heads'): model_kwargs['nhead'] = args.num_heads

@@ -7,6 +7,7 @@ import uuid
 import yaml
 import json
 import torch.nn as nn
+import math
 
 # Ensure we can import from the project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,6 +16,7 @@ from load.dataloader import get_loaders
 from scripts.train_supervised import MODEL_TYPES
 from engine.task_trainer import TaskTrainer
 from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel
+from utils.config import update_args_with_yaml
 import pandas as pd
 from sklearn.metrics import f1_score
 
@@ -110,8 +112,16 @@ def parse_args():
     # optional pretrained weights
     parser.add_argument('--pretrained_encoder', type=str, default=None,
                         help='Path to pretrained encoder weights (.pt file)')
+    parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
+    parser.add_argument('--warmup_epochs', type=int, default=10,
+                        help='Number of warmup epochs for the scheduler')
     
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    
+    # Load parameters from YAML if a config is provided
+    if args.config is not None:
+        args = update_args_with_yaml(args, args.config)
+        
     return args
 
 
@@ -461,6 +471,19 @@ def main():
     optimizer = torch.optim.AdamW(opt_params, lr=args.lr)
     criterion = nn.CrossEntropyLoss()
 
+    max_loader_len = max([len(loader) for loader in train_loaders.values()])
+    num_steps = max_loader_len * args.epochs
+    warmup_steps = max_loader_len * args.warmup_epochs
+
+    def warmup_cosine_schedule(step):
+        if step < warmup_steps:
+            return float(step) / float(max(1, warmup_steps))
+        else:
+            progress = float(step - warmup_steps) / float(max(1, num_steps - warmup_steps))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
+
     # Training loop
     history = []
     best_val, no_improve, best_state = float('inf'), 0, None
@@ -533,6 +556,7 @@ def main():
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
 
         # Validation
         row = {'epoch': epoch}
@@ -780,7 +804,7 @@ def main():
                 save_path=task_dir,
                 num_classes=task_classes[task],
                 label_mapper=tloader.dataset.label_mapper,
-                config=None
+                config=args
             )
             tm.plot_confusion_matrix(data_loader=tloader, epoch=None, mode=split)
             
