@@ -17,6 +17,15 @@ class PretrainDataset(_CSIDataset):
             csi, label = result
             row = self.split_metadata.iloc[index]
             user = row.get("user", f"unknown_user_{index}")
+
+            label_key = str(label)
+
+                # Handle decimal → binary label conversion (e.g. Localization)
+            if label_key not in self.label_mapper["label_to_idx"]:
+                dec_to_bin = self.label_mapper.get("decimal_to_binary", {})
+                label_key = dec_to_bin.get(label_key, label_key)
+
+            label_idx = self.label_mapper["label_to_idx"][label_key]
             
             return csi, label, user
         except Exception:

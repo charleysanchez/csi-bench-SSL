@@ -7,7 +7,7 @@ model: "transformer"
 
 # Training Protocol
 training:
-  epochs: 100
+  epochs: 300
   patience: 15
   batch_size: 128
   num_workers: 8
@@ -21,7 +21,7 @@ optimizer:
 # Learning Rate Scheduler
 scheduler:
   name: "warmup_cosine"
-  warmup_epochs: 5
+  warmup_epochs: 10
   min_lr_ratio: 0.0
 
 # Transformer Architecture
@@ -32,3 +32,10 @@ model_params:
   depth: 4
   num_heads: 8
   dropout: 0.1
+
+# ── NEW: Padding-Aware Masked Pretraining ──────────────────
+masking:
+  mask_ratio: 0.75      # fraction of VALID (non-padded) positions to mask
+  block_size: 4         # mask contiguous 4-timestep blocks (harder than random)
+  norm_pix_loss: true   # normalise reconstruction target per-sample variance
+  use_amp: true         # mixed precision (set false if on MPS/CPU)

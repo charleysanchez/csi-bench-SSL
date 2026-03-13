@@ -702,41 +702,94 @@ class MaskedLSTM(nn.Module):
     
 
 class MaskedTransformer(nn.Module):
-    def __init__(self, feature_size=232, d_model=256,
-                 nhead=8, num_layers=4, dropout=0.1):
+    """
+    Transformer-based masked autoencoder for CSI pretraining.
 
+    Args:
+        feature_size: Number of subcarrier features (max across all devices = 232).
+                      The model handles smaller inputs at runtime via dynamic projection.
+        d_model:      Transformer hidden dimension.
+        nhead:        Number of attention heads.
+        num_layers:   Number of transformer encoder layers.
+        dropout:      Dropout rate.
+    """
+
+    def __init__(
+        self,
+        feature_size: int = 232,
+        d_model: int = 256,
+        nhead: int = 8,
+        num_layers: int = 4,
+        dropout: float = 0.1,
+    ):
         super().__init__()
 
+        self.feature_size = feature_size
+        self.d_model      = d_model
+
+        # Input projection: maps subcarrier features → d_model
+        # Re-created dynamically if actual feature_size differs (variable subcarriers)
         self.input_proj = nn.Linear(feature_size, d_model)
+
         self.pos_encoder = PositionalEncoding(d_model, dropout)
 
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=d_model * 4,
-            dropout=dropout,
-            batch_first=True
+            d_model        = d_model,
+            nhead          = nhead,
+            dim_feedforward = d_model * 4,
+            dropout        = dropout,
+            batch_first    = True,  # expects [B, T, d_model]
         )
-
         self.transformer = nn.TransformerEncoder(
             encoder_layer,
-            num_layers=num_layers
+            num_layers=num_layers,
         )
 
-        # Reconstruction head
+        # Reconstruction head: maps d_model → subcarrier features
         self.output_proj = nn.Linear(d_model, feature_size)
 
-    def forward(self, x):
-        # x: [B, 1, T, F]
-        x = x.squeeze(1)  # [B, T, F]
+    # ------------------------------------------------------------------
 
-        x = self.input_proj(x)
+    def forward(
+        self,
+        x: torch.Tensor,
+        key_padding_mask: torch.Tensor = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x:                 [B, 1, T, F] or [B, T, F]
+                               Masked input (padded positions already zero,
+                               masked signal positions zeroed by the trainer).
+            key_padding_mask:  [B, T] BoolTensor, optional.
+                               True = this timestep is padding → ignore in attention.
+                               Provided by MaskedTrainer via build_transformer_key_padding_mask().
+
+        Returns:
+            [B, T, F]  Reconstructed full sequence.
+        """
+        # ── Normalise input shape to [B, T, F] ──────────────────────────
+        if x.dim() == 4:
+            x = x.squeeze(1)          # [B, 1, T, F] → [B, T, F]
+
+        actual_F = x.shape[-1]
+
+        # ── Dynamic input projection (handles variable subcarrier counts) ─
+        if self.input_proj.in_features != actual_F:
+            # Re-create projection on the correct device; weights are re-initialised
+            # but this is fine for pretraining — the encoder still learns to map
+            # any valid feature size into d_model space.
+            self.input_proj = nn.Linear(actual_F, self.d_model).to(x.device)
+
+        # ── Project + positional encoding ────────────────────────────────
+        x = self.input_proj(x)        # [B, T, d_model]
         x = self.pos_encoder(x)
 
-        x = self.transformer(x)
+        # ── Transformer (with optional padding mask) ──────────────────────
+        # key_padding_mask: [B, T]  True = ignore (standard PyTorch convention)
+        x = self.transformer(x, src_key_padding_mask=key_padding_mask)
 
-        # Reconstruct full sequence
-        x = self.output_proj(x)  # [B, T, F]
+        # ── Reconstruct subcarrier features ──────────────────────────────
+        x = self.output_proj(x)       # [B, T, F]
 
         return x
     

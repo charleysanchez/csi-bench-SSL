@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-Standalone OOD Evaluation Script
+Standalone OOD Evaluation Script with Test-Time Augmentation (TTA)
 
 Usage:
+    # Standard evaluation:
     python scripts/evaluate_ood.py \
         --weights results/HumanActivityRecognition/transformer/params_XYZ/best_model.pt \
-        --config configs/supervised_transformer.yaml \
+        --config configs/supervised_ood.yaml \
         --pipeline supervised \
         --tasks HumanActivityRecognition
+
+    # With TTA (recommended for OOD):
+    python scripts/evaluate_ood.py \
+        --weights results/.../best_model.pt \
+        --config configs/supervised_ood.yaml \
+        --pipeline supervised \
+        --tasks HumanActivityRecognition \
+        --tta --tta_rounds 10
 """
 
 import os
@@ -24,8 +33,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from load.dataloader import get_loaders
 from scripts.train_supervised import MODEL_TYPES
-from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel
+from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel, SimpleMultiTaskModel
 from utils.config import update_args_with_yaml
+from load.data_augmentation import CSIAugmentation
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained model on OOD test splits.")
@@ -37,6 +47,10 @@ def parse_args():
     parser.add_argument('--data_dir', type=str, default='data', help='Dataset root directory')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for evaluation')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of dataloader workers')
+    
+    # TTA options
+    parser.add_argument('--tta', action='store_true', help='Enable Test-Time Augmentation')
+    parser.add_argument('--tta_rounds', type=int, default=10, help='Number of TTA augmentation rounds')
     
     args, unknown = parser.parse_known_args()
     
@@ -84,12 +98,66 @@ def evaluate(model, loader, device, task=None):
         
     return accuracy, f1
 
+
+def evaluate_with_tta(model, loader, device, augmentor, n_rounds=10, task=None):
+    """
+    Run Test-Time Augmentation: for each batch, create n_rounds augmented versions,
+    average the softmax predictions, then pick the argmax.
+    """
+    model.eval()
+    all_preds = []
+    all_labels = []
+    
+    if hasattr(model, 'set_active_task') and task is not None:
+        model.set_active_task(task)
+    
+    with torch.no_grad():
+        for inputs, labels in loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            batch_size = inputs.size(0)
+            
+            # Start with the clean (un-augmented) prediction
+            clean_outputs = model(inputs)
+            avg_probs = torch.softmax(clean_outputs, dim=1)
+            
+            # Add augmented predictions
+            for _ in range(n_rounds):
+                aug_inputs = augmentor(inputs.clone())
+                aug_outputs = model(aug_inputs)
+                avg_probs += torch.softmax(aug_outputs, dim=1)
+            
+            # Average over (1 clean + n_rounds augmented)
+            avg_probs /= (n_rounds + 1)
+            
+            _, predicted = torch.max(avg_probs, 1)
+            
+            all_preds.extend(predicted.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+    
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    
+    accuracy = (all_preds == all_labels).mean()
+    
+    if len(set(all_labels)) > 1:
+        try:
+            f1 = f1_score(all_labels, all_preds, average='weighted')
+        except Exception:
+            f1 = 0.0
+    else:
+        f1 = 0.0
+    
+    return accuracy, f1
+
+
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n{'='*80}")
     print(f" STARTING OOD EVALUATION ON DEVICE: {device}")
     print(f" WEIGHTS: {args.weights}")
+    if args.tta:
+        print(f" TTA ENABLED: {args.tta_rounds} rounds")
     print(f"{'='*80}\n")
 
     tasks = args.tasks.split(',')
@@ -160,7 +228,7 @@ def main():
                 def __getattr__(self, name): return self.get(name)
             
             backbone.config = ConfigDict(hidden_size=getattr(args, 'emb_dim', 256), num_hidden_layers=len(backbone_model.transformer.layers))
-            model = MultiTaskAdapterModel(backbone, task_classes, lora_r=getattr(args, 'lora_r', 8), lora_alpha=getattr(args, 'lora_alpha', 32), lora_dropout=getattr(args, 'lora_dropout', 0.05))
+            model = SimpleMultiTaskModel(backbone, task_classes)
         else:
             raise NotImplementedError("Eval script currently only configured for multitask transformer wrapping.")
     else:
@@ -170,32 +238,65 @@ def main():
 
     # 4. Load Weights
     print(f"Loading weights from {args.weights}...")
-    state_dict = torch.load(args.weights, map_location=device)
+    state_dict = torch.load(args.weights, map_location=device, weights_only=False)
     
     # Handle different save formats
-    if 'adapters' in state_dict and args.pipeline == 'multitask':
-        # Multitask save format
-        model.adapters.load_state_dict(state_dict['adapters'])
-        model.heads.load_state_dict(state_dict['heads'])
+    if 'backbone' in state_dict and 'heads' in state_dict and args.pipeline == 'multitask':
+        # New multitask save format (backbone + heads)
+        model.backbone.load_state_dict(state_dict['backbone'])
+        for task_name, head_state in state_dict['heads'].items():
+            model.heads[task_name].load_state_dict(head_state)
     elif 'model_state_dict' in state_dict:
         model.load_state_dict(state_dict['model_state_dict'])
+    elif 'model_state' in state_dict:
+        model.load_state_dict(state_dict['model_state'])
     else:
         # Standard state dict
         model.load_state_dict(state_dict)
 
     print("Weights loaded successfully!\n")
 
-    # 5. Evaluate
+    # 5. Create TTA augmentor if needed (use mild augmentation for TTA)
+    if args.tta:
+        tta_augmentor = CSIAugmentation(
+            amp_scale_range=(0.8, 1.2),     # Mild amplitude scaling
+            noise_std=0.05,                  # Light noise
+            time_shift_max=10,               # Small time shifts
+            subcarrier_drop_max=5,           # Few subcarriers dropped
+            subcarrier_drop_prob=0.3,
+            time_shift_prob=0.3,
+            noise_prob=0.5,
+            freq_jitter_prob=0.2,
+            freq_jitter_std=0.02,
+        )
+
+    # 6. Evaluate
     for task in tasks:
         print(f"{'-'*50}\n Results for: {task}\n{'-'*50}")
         tdict = test_loaders[task]
         
-        print(f"{'Split':<20} {'Accuracy':<15} {'F1 Score':<15}")
-        print('-' * 50)
+        if args.tta:
+            print(f"{'Split':<20} {'Standard':<25} {'TTA (' + str(args.tta_rounds) + ' rounds)':<25}")
+            print('-' * 70)
+        else:
+            print(f"{'Split':<20} {'Accuracy':<15} {'F1 Score':<15}")
+            print('-' * 50)
         
         for split, tloader in tdict.items():
-            acc, f1 = evaluate(model, tloader, device, task=task if args.pipeline == 'multitask' else None)
-            print(f"{split:<20} {acc*100:>6.2f}%         {f1*100:>6.2f}%")
+            task_arg = task if args.pipeline == 'multitask' else None
+            
+            if args.tta:
+                # Run both standard and TTA evaluation for comparison
+                acc_std, f1_std = evaluate(model, tloader, device, task=task_arg)
+                acc_tta, f1_tta = evaluate_with_tta(model, tloader, device, tta_augmentor, 
+                                                     n_rounds=args.tta_rounds, task=task_arg)
+                delta = acc_tta - acc_std
+                delta_sign = "+" if delta >= 0 else ""
+                print(f"{split:<20} {acc_std*100:>6.2f}% / {f1_std*100:>5.2f}%    "
+                      f"{acc_tta*100:>6.2f}% / {f1_tta*100:>5.2f}%  ({delta_sign}{delta*100:.1f}%)")
+            else:
+                acc, f1 = evaluate(model, tloader, device, task=task_arg)
+                print(f"{split:<20} {acc*100:>6.2f}%         {f1*100:>6.2f}%")
             
     print("\nEvaluation Complete!")
 

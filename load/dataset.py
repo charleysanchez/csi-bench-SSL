@@ -100,7 +100,7 @@ class CSIDataset(Dataset):
         with open(self.label_mapper_path, "r") as f:
             self.label_mapper = json.load(f)
 
-        self.num_classes = self.label_mapper["num_classes"]
+        self.num_classes = self.label_mapper.get("num_classes", len(self.label_mapper.get("label_to_idx", {})))
 
     def __len__(self):
         return len(self.split_metadata)
@@ -114,6 +114,7 @@ class CSIDataset(Dataset):
             fullPath = os.path.normpath(os.path.join(self.task_dir, subPath))
 
             # load in .h5 files (only working with this rn)
+            csi_data = None
             with h5py.File(fullPath, "r") as f:
                 if len(f.keys()) == 0:
                     print(
@@ -167,7 +168,15 @@ class CSIDataset(Dataset):
                 label = self.target_transform(label)
 
             label_key = str(label)
-
+            if label_key not in self.label_mapper["label_to_idx"]:
+                # Try zero-padding to 3 digits first (e.g. "10" → "010" for Localization)
+                label_key_padded = label_key.zfill(3)
+                if label_key_padded in self.label_mapper["label_to_idx"]:
+                    label_key = label_key_padded
+                else:
+                    # Fall back to decimal → binary map
+                    dec_to_bin = self.label_mapper.get("decimal_to_binary", {})
+                    label_key = dec_to_bin.get(label_key, label_key)
             label_idx = self.label_mapper["label_to_idx"][label_key]
 
             return csi_standardized, label_idx

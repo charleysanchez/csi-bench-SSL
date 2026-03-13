@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd  # Ensure pandas is imported
+from load.data_augmentation import CSIAugmentation
 from load.dataloader import get_loaders
 from tqdm import tqdm
 import json
@@ -82,7 +83,7 @@ def main(args=None):
                             help='Type of model to train')
         parser.add_argument('--batch_size', type=int, default=32, help='Batch size for training')
         parser.add_argument('--epochs', type=int, default=30, help='Number of epochs to train')
-        parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
+        parser.add_argument('--lr', type=float, default=0.001, help='Learning rate')
         parser.add_argument('--data_key', type=str, default='CSI_amps',
                             help='Key for CSI data in h5 files')
         parser.add_argument('--save_dir', type=str, default='results',
@@ -104,10 +105,10 @@ def main(args=None):
                             help='Number of input channels for convolutional models')
         parser.add_argument('--emb_dim', type=int, default=128, 
                             help='Embedding dimension for transformer models')
-        parser.add_argument('--d_model', type=int, default=256, 
-                            help='Model dimension for Transformer model')
         parser.add_argument('--dropout', type=float, default=0.1, 
                             help='Dropout rate for regularization')
+        parser.add_argument('--label_smoothing', type=float, default=0.1,
+                            help='Label smoothing factor (0=off, 0.1=recommended for OOD)')
         # PatchTST specific parameters
         parser.add_argument('--patch_len', type=int, default=16,
                             help='Patch length for PatchTST model')
@@ -195,13 +196,11 @@ def main(args=None):
 
     # generate a unique experiment ID based only on parameters hash
     # this way, same parameters will generate same experiment ID
-    param_str = f"{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.weight_decay}_{args.warmup_epochs}_{args.win_len}_{args.feature_size}"
+    param_str = f"{args.lr}_{args.batch_size}_{args.epochs}_{args.weight_decay}_{args.warmup_epochs}_{args.win_len}_{args.feature_size}"
     if hasattr(args, 'dropout') and args.dropout is not None:
         param_str += f"_{args.dropout}"
     if hasattr(args, 'emb_dim') and args.emb_dim is not None:
         param_str += f"_{args.emb_dim}"
-    if hasattr(args, 'd_model') and args.d_model is not None:
-        param_str += f"_{args.d_model}"
     if hasattr(args, 'in_channels') and args.in_channels is not None:
         param_str += f"_{args.in_channels}"
     
@@ -331,7 +330,7 @@ def main(args=None):
     if args.model == 'transformer':
         model_kwargs.update({
             'feature_size': args.feature_size,
-            'd_model': args.d_model,
+            'd_model': args.emb_dim,
             'dropout': args.dropout
         })
     
@@ -384,31 +383,56 @@ def main(args=None):
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
 
-    # ---------------------------------------------------------
-    # DIFFERENTIAL LEARNING RATES
-    # ---------------------------------------------------------
-    head_params = []
-    backbone_params = []
-    
-    # Sort parameters based on whether they belong to the new head or the pretrained backbone
-    for name, param in model.named_parameters():
-        if 'classifier' in name or 'head' in name or 'fc' in name:
-            head_params.append(param)
-        else:
-            backbone_params.append(param)
+    # Set up optimizer — train ALL parameters (matches paper Section B.3)
+    if args.pretrained_encoder is not None:
+        freeze_layers = getattr(args, 'freeze_layers', [0, 1, 2])  # freeze first 3 of 4 layers by default
+        if hasattr(model, 'transformer') and hasattr(model.transformer, 'layers'):
+            for layer_idx in freeze_layers:
+                if layer_idx < len(model.transformer.layers):
+                    for param in model.transformer.layers[layer_idx].parameters():
+                        param.requires_grad = False
+                    print(f"  Froze transformer layer {layer_idx}")
+        head_params = []
+        backbone_params = []
+        
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if 'classifier.' in name:
+                head_params.append(param)
+            else:
+                backbone_params.append(param)
 
-    # Give the head the full learning rate, and the backbone a 10x smaller learning rate
-    optimizer = torch.optim.AdamW([
-        {'params': backbone_params, 'lr': args.learning_rate * 0.1},
-        {'params': head_params, 'lr': args.learning_rate}
-    ], weight_decay=args.weight_decay)
-    
-    print("Optimizer initialized with Differential LRs:")
-    print(f"  - Head LR: {args.learning_rate}")
-    print(f"  - Backbone LR: {args.learning_rate * 0.1}")
-    # ---------------------------------------------------------
+        backbone_lr = args.lr * 0.1
+        print(f"\nDiscriminative LR: backbone={backbone_lr}, head={args.lr}")
+        print(f"  Backbone params: {sum(p.numel() for p in backbone_params)}, Head params: {sum(p.numel() for p in head_params)}")
+        optimizer = torch.optim.AdamW([
+            {'params': backbone_params, 'lr': backbone_lr},      # pretrained backbone at 0.1x LR
+            {'params': head_params, 'lr': args.lr}     # classifier head at full LR
+        ], weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.AdamW(
+        model.parameters(), 
+        lr=args.lr, 
+        weight_decay=args.weight_decay
+    )
+    # Print parameter summary
+    num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    num_total = sum(p.numel() for p in model.parameters())
+    if args.pretrained_encoder is not None:
+        num_frozen = num_total - num_trainable
+        print(f"\nParameter Summary (Pretrained Encoder):")
+        print(f"  Total params:     {num_total:,}")
+        print(f"  Frozen params:    {num_frozen:,} ({num_frozen/num_total*100:.1f}%)")
+        print(f"  Trainable params: {num_trainable:,} ({num_trainable/num_total*100:.1f}%)")
+    else:
+        print(f"\nOptimizer: AdamW (lr={args.lr}, wd={args.weight_decay})")
+        print(f"  Trainable: {num_trainable}/{num_total} ({100*num_trainable/num_total:.1f}%)")
 
-    criterion = nn.CrossEntropyLoss()
+    label_smoothing = getattr(args, 'label_smoothing', 0.0)
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    if label_smoothing > 0:
+        print(f"Using label smoothing: {label_smoothing}")
 
     # create step-level warmup cosine LR scheduler (matches original repo)
     num_steps = len(train_loader) * args.epochs
@@ -450,8 +474,71 @@ def main(args=None):
     best_epoch = training_results["best_epoch"]
     history = training_results["training_dataframe"]
 
+    # ==================== STOCHASTIC WEIGHT AVERAGING (SWA) ====================
+    swa_epochs = getattr(args, 'swa_epochs', 20)
+    swa_lr = getattr(args, 'swa_lr', 1e-4)
+    
+    if swa_epochs > 0:
+        swa_lr = float(swa_lr)
+        print(f"\n{'='*60}")
+        print(f"  STARTING SWA: {swa_epochs} epochs with lr={swa_lr}")
+        print(f"{'='*60}")
+        
+        from torch.optim.swa_utils import AveragedModel, SWALR
+        
+        swa_model = AveragedModel(model)
+        swa_optimizer = torch.optim.SGD(model.parameters(), lr=swa_lr)
+        swa_scheduler = SWALR(swa_optimizer, swa_lr=swa_lr)
+        
+        model.train()
+        for swa_epoch in range(swa_epochs):
+            epoch_loss = 0.0
+            epoch_correct = 0
+            total = 0
+            
+            for inputs, labels in train_loader:
+                if inputs.size(0) == 0:
+                    continue
+                inputs = inputs.to(device)
+                labels = labels.to(device).long()
+                if labels.dim() > 1:
+                    labels = labels.squeeze()
+                
+                swa_optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                swa_optimizer.step()
+                
+                epoch_loss += loss.item() * inputs.size(0)
+                _, preds = torch.max(outputs, 1)
+                epoch_correct += (preds == labels).sum().item()
+                total += inputs.size(0)
+            
+            swa_model.update_parameters(model)
+            swa_scheduler.step()
+            
+            if (swa_epoch + 1) % 5 == 0 or swa_epoch == 0:
+                print(f"  SWA Epoch {swa_epoch+1}/{swa_epochs} - Loss: {epoch_loss/total:.4f}, Acc: {epoch_correct/total:.4f}")
+        
+        # Update batch normalization statistics for the SWA model
+        print("  Updating SWA batch norm statistics...")
+        torch.optim.swa_utils.update_bn(train_loader, swa_model, device=device)
+        
+        # Save SWA model
+        swa_model_path = os.path.join(checkpoint_dir, "swa_model.pt")
+        torch.save(swa_model.module.state_dict(), swa_model_path)
+        print(f"  SWA model saved to {swa_model_path}")
+        
+        # Use SWA model for evaluation
+        model = swa_model.module
+        trainer.model = model  # Update trainer reference for evaluation
+        print(f"{'='*60}\n")
+
     # evaluate on test dataset
     print("\nEvaluating on test splits:")
+
     all_results = {}
     
     import gc

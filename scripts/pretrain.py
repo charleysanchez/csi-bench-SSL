@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 from load.dataloader import get_loaders
 from load.dataset import CSIDataset
 from load.pretrain_dataset import PretrainDataset
+from load.data_augmentation import CSIAugmentation
 from engine.masked_trainer import MaskedTrainer
 from engine.cpc_trainer import CPCTrainer
 from utils.config import update_args_with_yaml, save_config

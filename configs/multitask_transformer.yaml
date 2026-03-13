@@ -19,12 +19,13 @@ training:
 optimizer:
   name: "adamw"
   lr: 0.001
-  weight_decay: 1e-5
+  weight_decay: 1e-3
+  label_smoothing: 0.1
 
 # Learning Rate Scheduler (Matches Section B.3)
 scheduler:
   name: "warmup_cosine"
-  warmup_epochs: 5
+  warmup_epochs: 10
   min_lr_ratio: 0.0
 
 # Architecture & Adapter Settings (Matches Section B.1 & B.2)
@@ -36,7 +37,6 @@ model_params:
   depth: 4           # Paper: 4 layers
   num_heads: 8       # Paper: 8 attention heads
   dropout: 0.1       # Paper: dropout is set to 0.1
-  d_model: 256
   
   # LoRA Adapter Configuration
   lora_r: 8          # Paper: rank=8

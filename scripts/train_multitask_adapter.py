@@ -13,9 +13,10 @@ import math
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from load.dataloader import get_loaders
+from load.data_augmentation import CSIAugmentation
 from scripts.train_supervised import MODEL_TYPES
 from engine.task_trainer import TaskTrainer
-from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel
+from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel, MultiTaskAdapterModelPEFT, SimpleMultiTaskModel
 from utils.config import update_args_with_yaml
 import pandas as pd
 from sklearn.metrics import f1_score
@@ -112,6 +113,8 @@ def parse_args():
     # optional pretrained weights
     parser.add_argument('--pretrained_encoder', type=str, default=None,
                         help='Path to pretrained encoder weights (.pt file)')
+    parser.add_argument('--freeze_backbone', action="store_true", default=False,
+                        help='freeze backbone to allow pretraining to work on its own.')
     parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
     parser.add_argument('--warmup_epochs', type=int, default=10,
                         help='Number of warmup epochs for the scheduler')
@@ -300,13 +303,8 @@ def main():
             use_return_dict=False
         )
 
-        # Create MultiTaskAdapterModel with the backbone
-        model = MultiTaskAdapterModel(
-            backbone, task_classes,
-            lora_r=args.lora_r,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout
-        )
+        # Create SimpleMultiTaskModel (no LoRA/PEFT — uses partial layer freezing)
+        model = SimpleMultiTaskModel(backbone, task_classes)
 
     elif args.model == 'patchtst':
         class PatchTSTEmbedding(nn.Module):
@@ -466,14 +464,66 @@ def main():
 
     model.to(device)
 
-    # Optimizer & criterion
-    opt_params = list(model.adapters.parameters()) + list(model.heads.parameters())
-    optimizer = torch.optim.AdamW(opt_params, lr=args.lr)
-    criterion = nn.CrossEntropyLoss()
+    # ---------------------------------------------------------
+    # PARTIAL LAYER FREEZING + DIFFERENTIAL LEARNING RATES
+    # Freeze early transformer layers, train only last layer + heads.
+    # This preserves pretrained low-level features while allowing
+    # high-level task-specific adaptation.
+    # ---------------------------------------------------------
+    freeze_layers = getattr(args, 'freeze_layers', [0, 1, 2])  # freeze first 3 of 4 layers by default
+    
+    # Freeze specified transformer layers
+    if hasattr(model.backbone, 'transformer') and hasattr(model.backbone.transformer, 'layers'):
+        for layer_idx in freeze_layers:
+            if layer_idx < len(model.backbone.transformer.layers):
+                for param in model.backbone.transformer.layers[layer_idx].parameters():
+                    param.requires_grad = False
+                print(f"  Froze transformer layer {layer_idx}")
+    
+    # Also freeze positional encoding (it's pretrained)
+    if hasattr(model.backbone, 'pos_encoder'):
+        for param in model.backbone.pos_encoder.parameters():
+            param.requires_grad = False
+        print(f"  Froze positional encoder")
+    
+    # Collect trainable params into optimizer groups
+    head_params = []
+    backbone_params = []
+    
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if 'heads.' in name:
+            head_params.append(param)
+        else:
+            backbone_params.append(param)
+    
+    # Weight decay: stronger than before to reduce overfitting
+    wd = float(getattr(args, 'weight_decay', 1e-3))
+    optimizer = torch.optim.AdamW([
+        {'params': backbone_params, 'lr': args.lr * 0.1},  # unfrozen backbone layers at lower LR
+        {'params': head_params, 'lr': args.lr}              # heads at full LR
+    ], weight_decay=wd)
+    
+    # Print parameter summary
+    n_trainable = sum(p.numel() for p in head_params) + sum(p.numel() for p in backbone_params)
+    n_total = sum(p.numel() for p in model.parameters())
+    n_frozen = n_total - n_trainable
+    print(f"\nParameter Summary (Partial Unfreezing):")
+    print(f"  Total params:     {n_total:,}")
+    print(f"  Frozen params:    {n_frozen:,} ({n_frozen/n_total*100:.1f}%)")
+    print(f"  Trainable params: {n_trainable:,} ({n_trainable/n_total*100:.1f}%)")
+    print(f"  Backbone (unfrozen layers): {sum(p.numel() for p in backbone_params):,}  (lr={args.lr * 0.1})")
+    print(f"  Heads:                      {sum(p.numel() for p in head_params):,}  (lr={args.lr})")
+    print(f"  Weight decay: {wd}")
+    # --------------------------------------------------------
+    label_smoothing = float(getattr(args, 'label_smoothing', 0.1))
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    print(f"  Label smoothing: {label_smoothing}")
 
-    max_loader_len = max([len(loader) for loader in train_loaders.values()])
-    num_steps = max_loader_len * args.epochs
-    warmup_steps = max_loader_len * args.warmup_epochs
+    total_loader_len = sum(len(loader) for loader in train_loaders.values())
+    num_steps = total_loader_len * args.epochs
+    warmup_steps = total_loader_len * args.warmup_epochs
 
     def warmup_cosine_schedule(step):
         if step < warmup_steps:
@@ -486,10 +536,10 @@ def main():
 
     # Training loop
     history = []
-    best_val, no_improve, best_state = float('inf'), 0, None
-    
+    task_no_improve = {task: 0 for task in task_classes}
+    TASK_PATIENCE = 15  # per-task patience    
     # Store best metrics and states for each task
-    best_metrics = {task: {'val_loss': float('inf'), 'val_acc': 0, 'best_epoch': 0} for task in task_classes}
+    best_metrics = {task: {'val_loss': float('inf'), 'val_acc': 0, 'val_f1': 0, 'best_epoch': 0} for task in task_classes}
     best_task_states = {}
 
 
@@ -529,10 +579,9 @@ def main():
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
                 
-                # Calculate F1 score
-                if len(set(labels.cpu().numpy())) > 1:  # Ensure there are multiple classes
-                    all_preds.extend(predicted.cpu().numpy())
-                    all_labels.extend(labels.cpu().numpy())
+                # Collect predictions for F1 score (include all batches)
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
         
         if len(all_preds) > 0 and len(all_labels) > 0:
             try:
@@ -544,19 +593,28 @@ def main():
             f1 = 0.0
         
         return total_loss / len(loader), correct / total, f1
+    
+    augment = CSIAugmentation()
 
     for epoch in range(1, args.epochs + 1):
         model.train()
+        train_losses = {}
         for task, loader in train_loaders.items():
             model.set_active_task(task)
+            running_loss = 0.0
             for x, y in loader:
                 x, y = x.to(device), y.to(device)
+                x = augment(x)
                 logits = model(x)
                 loss = criterion(logits, y)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 scheduler.step()
+
+                running_loss += loss.item()\
+                
+            train_losses[task] = running_loss / len(loader)
 
         # Validation
         row = {'epoch': epoch}
@@ -566,27 +624,26 @@ def main():
             model.set_active_task(task)
             v_l, v_a, v_f1 = evaluate(model, vloader, criterion, device)
             val_losses.append(v_l)
+            row[f"{task}_train_loss"] = train_losses[task]
             row[f"{task}_val_loss"] = v_l
             row[f"{task}_val_acc"] = v_a
             row[f"{task}_val_f1"] = v_f1
-            print(f"  {task}: loss={v_l:.4f}, acc={v_a:.4f}, f1={v_f1:.4f}")
-            
+            print(f"  {task}: Train Loss: {train_losses[task]:.4f} | Val Loss: {v_l:.4f} | Val Acc: {v_a:.4f} | Val F1: {v_f1:.4f}")            
             # Create task-specific directory structure for results
             task_dir = os.path.join(args.save_dir, task, args.model, experiment_id)
             os.makedirs(task_dir, exist_ok=True)
             
             # Update best metrics if improved
-            if v_a > best_metrics[task]['val_acc']:
-                print(f"  New best accuracy for {task}: {v_a:.4f} (previous: {best_metrics[task]['val_acc']:.4f})")
+            if v_l < best_metrics[task]['val_loss']:
+                print(f"  New best val loss for {task}: {v_l:.4f} (previous: {best_metrics[task]['val_loss']:.4f})")
                 best_metrics[task]['val_loss'] = v_l
                 best_metrics[task]['val_acc'] = v_a
                 best_metrics[task]['val_f1'] = v_f1
                 best_metrics[task]['best_epoch'] = epoch
                 
-                # Save task-specific best state
-                model.set_active_task(task)
+                # Save task-specific best state (full model snapshot)
                 best_task_states[task] = {
-                    'adapters': model.adapters.state_dict(),
+                    'model_state': {k: v.cpu().clone() for k, v in model.state_dict().items()},
                     'head': model.heads[task].state_dict()
                 }
 
@@ -594,24 +651,17 @@ def main():
         avg_val = sum(val_losses) / len(val_losses)
         print(f"Epoch {epoch}: avg_val_loss={avg_val:.4f}")
 
-        # Early stopping based on average validation loss
-        if avg_val < best_val:
-            best_val = avg_val
-            no_improve = 0
-            best_state = {
-                'adapters': model.adapters.state_dict(),
-                'heads': model.heads.state_dict()
-            }
-        else:
-            no_improve += 1
-            if no_improve >= args.patience:
-                print(f"Early stopping at epoch {epoch}")
-                break
+        # Per-task patience tracking
+        for task in task_classes:
+            if row.get(f"{task}_val_loss", float('inf')) <= best_metrics[task]['val_loss']:
+                task_no_improve[task] = 0
+            else:
+                task_no_improve[task] += 1
 
-    # Restore best overall state
-    if best_state:
-        model.adapters.load_state_dict(best_state['adapters'])
-        model.heads.load_state_dict(best_state['heads'])
+        # Stop when ALL tasks have plateaued
+        if all(task_no_improve[t] >= TASK_PATIENCE for t in task_classes):
+            print(f"All tasks plateaued. Early stopping at epoch {epoch}")
+            break
 
     # Now generate confusion matrices and classification reports for the best model of each task
     print("\nGenerating visualization for the best model of each task...")
@@ -629,6 +679,7 @@ def main():
         for row in history:
             task_row = {
                 'epoch': row['epoch'],
+                'train_loss': row.get(f"{task}_train_loss", None),
                 'val_loss': row.get(f"{task}_val_loss", None),
                 'val_acc': row.get(f"{task}_val_acc", None),
                 'val_f1': row.get(f"{task}_val_f1", None)
@@ -682,8 +733,7 @@ def main():
         
         # Load task-specific best state if available
         if task in best_task_states:
-            model.adapters.load_state_dict(best_task_states[task]['adapters'])
-            model.heads[task].load_state_dict(best_task_states[task]['head'])
+            model.load_state_dict(best_task_states[task]['model_state'])
         
         # Set active task
         model.set_active_task(task)
@@ -691,7 +741,7 @@ def main():
         # Save task-specific model weights
         task_model_path = os.path.join(checkpoint_dir, "best.pth")
         torch.save({
-            'adapters': model.adapters.state_dict(),
+            'backbone': model.backbone.state_dict(),
             'heads': {task: model.heads[task].state_dict()}
         }, task_model_path)
         
@@ -721,7 +771,7 @@ def main():
             'best_val_f1': best_metrics[task]['val_f1'],
             'best_epoch': best_metrics[task]['best_epoch'],
             'total_epochs': len(history),
-            'early_stopped': no_improve >= args.patience,
+            'early_stopped': all(task_no_improve[t] >= TASK_PATIENCE for t in task_classes),
             'model': args.model,
             'task': task
         }
@@ -735,8 +785,8 @@ def main():
                 with open(best_perf_path, 'r') as f:
                     best_perf = json.load(f)
                 
-                # Update only when validation accuracy improves
-                if best_metrics[task]['val_acc'] > best_perf.get('best_val_accuracy', 0):
+                # Update only when validation loss improves
+                if best_metrics[task]['val_loss'] < best_perf.get('best_val_loss', 0):
                     best_perf = {
                         'best_experiment_id': experiment_id,
                         'best_val_accuracy': best_metrics[task]['val_acc'],
@@ -767,9 +817,7 @@ def main():
         
         # Load task-specific best state if available
         if task in best_task_states:
-            model.adapters.load_state_dict(best_task_states[task]['adapters'])
-            model.heads[task].load_state_dict(best_task_states[task]['head'])
-        
+            model.load_state_dict(best_task_states[task]['model_state'])
         # Set active task
         model.set_active_task(task)
         
@@ -860,7 +908,7 @@ def main():
     full_model_dir = os.path.join(args.save_dir, "shared_models")
     os.makedirs(full_model_dir, exist_ok=True)
     torch.save(
-        {'adapters': best_state['adapters'], 'heads': best_state['heads']},
+        {task: best_task_states[task] for task in best_task_states},
         os.path.join(full_model_dir, f'multitask_adapters_{experiment_id}.pt')
     )
     

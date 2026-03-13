@@ -1,0 +1,7 @@
+{
+    "best_epoch": 299,
+    "best_val_loss": 0.183183703571558,
+    "experiment_id": "2f0392da3e",
+    "task": "all_tasks",
+    "timestamp": "2026-03-12 01:29:58"
+}

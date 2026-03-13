@@ -537,3 +537,91 @@ class TimesFormerAdapterModel(nn.Module):
         
         return logits
     
+class MultiTaskAdapterModelPEFT(nn.Module):
+    def __init__(
+            self,
+            backbone,
+            task_classes: Dict[str, int],
+            lora_r: int = 8,
+            lora_alpha: int = 32,
+            lora_dropout: float = 0.05,
+    ):
+        super().__init__()
+        self.task_names = list(task_classes.keys())
+        self.active_task = None
+
+        lora_config = LoraConfig(
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            target_modules=["out_proj", "linear1", "linear2"],
+            bias="none",
+        )
+
+        # create PEFT model. first task intializes the base adapter
+        self.backbone = get_peft_model(backbone, lora_config,
+                                       adapter_name=self.task_names[0])
+
+        # add a separate adapter for each ramining task
+        for task in self.task_names[1:]:
+            self.backbone.add_adapter(task, lora_config)
+
+        # task specific classification head
+        hidden_size = backbone.config.hidden_size
+        self.heads = nn.ModuleDict({
+            task: nn.Linear(hidden_size, num_classes)
+            for task, num_classes in task_classes.items()
+        })
+
+        for head in self.heads.values():
+            nn.init.xavier_uniform_(head.weight)
+            nn.init.zeros_(head.bias)
+
+
+    def set_active_task(self, task_name: str):
+        if task_name not in self.task_names:
+            raise ValueError(f"Unknown task: {task_name}")
+        self.active_task = task_name
+        self.backbone.set_adapter(task_name)
+
+    def forward(self, x):
+        if self.active_task is None:
+            raise ValueError("Call set_active_task first.")
+        features = self.backbone(x)
+        return self.heads[self.active_task](features)
+    
+    def print_trainable_parameters(self):
+        self.backbone.print_trainable_parameters()
+
+
+class SimpleMultiTaskModel(nn.Module):
+    """
+    Simple multi-task model: shared backbone + task-specific linear heads.
+    No LoRA or adapters — relies on partial layer freezing for regularization.
+    """
+    def __init__(self, backbone, task_classes: Dict[str, int]):
+        super().__init__()
+        self.backbone = backbone
+        self.task_names = list(task_classes.keys())
+        self.active_task = None
+
+        hidden_size = backbone.config.hidden_size
+        self.heads = nn.ModuleDict({
+            task: nn.Linear(hidden_size, num_classes)
+            for task, num_classes in task_classes.items()
+        })
+        for head in self.heads.values():
+            nn.init.xavier_uniform_(head.weight)
+            nn.init.zeros_(head.bias)
+
+    def set_active_task(self, task_name: str):
+        if task_name not in self.task_names:
+            raise ValueError(f"Unknown task: {task_name}")
+        self.active_task = task_name
+
+    def forward(self, x):
+        if self.active_task is None:
+            raise ValueError("Call set_active_task first.")
+        features = self.backbone(x)
+        return self.heads[self.active_task](features)
+        

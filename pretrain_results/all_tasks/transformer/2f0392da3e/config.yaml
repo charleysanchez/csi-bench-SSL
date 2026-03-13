@@ -1,6 +1,6 @@
 training:
   batch_size: 128
-  epochs: 100
+  epochs: 300
   warmup_epochs: 10
   patience: 15
 model_params:

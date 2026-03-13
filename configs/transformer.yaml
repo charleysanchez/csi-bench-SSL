@@ -21,4 +21,3 @@ model_params:
   emb_dim: 128
   dropout: 0.1
   depth: 4
-  d_model: 256

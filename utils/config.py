@@ -49,7 +49,7 @@ def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.
         if hasattr(args, k):
             existing_v = getattr(args, k)
             
-            # FIX THE BRACKETS: Safely convert YAML lists to comma-separated strings
+            # Special case: convert list to comma-string only if existing arg is string
             if isinstance(v, list) and isinstance(existing_v, str):
                 v = ",".join(str(x) for x in v)
 
@@ -69,9 +69,7 @@ def update_args_with_yaml(args: argparse.Namespace, yaml_path: str) -> argparse.
         else:
             # 3. OVERRIDE: If the parser didn't know about this argument, 
             # inject it into the namespace anyway so the model can access it!
-            if isinstance(v, list):
-                # If it's a list that needs to act like a CLI string, convert it
-                v = ",".join(str(x) for x in v)
+            # Keep lists as lists — don't convert to strings
             setattr(args, k, v)
             
     return args
@@ -83,7 +81,6 @@ def save_config(args: argparse.Namespace, save_path: str) -> None:
     try:
         args_dict = vars(args)
     except TypeError:
-        # It's already a dict or can't be vars()'d
         args_dict = dict(args) if isinstance(args, dict) else {}
         
     # Group logically
@@ -96,12 +93,17 @@ def save_config(args: argparse.Namespace, save_path: str) -> None:
         'stride', 'pool', 'head_dropout', 'patch_size', 'attn_dropout', 
         'mlp_ratio', 'in_channels', 'win_len', 'feature_size'
     ]
+    # NEW: masking keys for padding-aware MAE pretraining
+    masking_keys = [
+        'mask_ratio', 'block_size', 'norm_pix_loss', 'use_amp',
+    ]
     
     config_struct = {
         'training': {},
         'model_params': {},
         'optimizer': {},
         'scheduler': {},
+        'masking': {},   # NEW section
         'general': {}
     }
     
@@ -119,6 +121,8 @@ def save_config(args: argparse.Namespace, save_path: str) -> None:
             config_struct['training'][k] = v
         elif k in model_keys:
             config_struct['model_params'][k] = v
+        elif k in masking_keys:          # NEW
+            config_struct['masking'][k] = v
         else:
             config_struct['general'][k] = v
             

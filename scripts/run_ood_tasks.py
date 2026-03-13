@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument("--model", type=str, default=None, help="Model architecture. Auto-inferred if encoder is provided.")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train for.")
     parser.add_argument("--pipeline", type=str, default="supervised", choices=["supervised", "multitask"], help="Choose training approach.")
+    parser.add_argument('--freeze_backbone', action="store_true", default=False,
+                        help='freeze backbone to allow pretraining to work on its own.')
     return parser.parse_args()
 
 args = parse_args()
@@ -66,7 +68,7 @@ else:
 
 # Configuration
 SEEDS = [42, 43, 44]  # 3 seeds for speed
-TASKS = ["HumanActivityRecognition", "HumanIdentification", "ProximityRecognition"]
+TASKS = ["HumanActivityRecognition", "ProximityRecognition", "HumanIdentification"]
 
 
 # ==============================================================================
@@ -97,6 +99,8 @@ if args.pipeline == "multitask":
         
         if ENCODER is not None: cmd.extend(["--pretrained_encoder", ENCODER])
         if CONFIG is not None: cmd.extend(["--config", CONFIG])
+        if args.freeze_backbone:
+            cmd.extend(["--freeze_backbone"])
             
         result = subprocess.run(cmd, text=True)
         

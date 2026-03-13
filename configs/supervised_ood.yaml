@@ -21,21 +21,26 @@ optimizer:
 # Learning Rate Scheduler (Matches Section B.3)
 scheduler:
   name: "warmup_cosine"
-  warmup_epochs: 10
+  warmup_epochs: 5
   min_lr_ratio: 0.0
 
-# Architecture & Adapter Settings (Matches Section B.1 & B.2)
+# Architecture Settings (Matches Section B.1)
 model_params:
-  # Transformer Backbone Configuration
   win_len: 500
   feature_size: 232
   emb_dim: 256       # Paper: model dimension=256
   depth: 4           # Paper: 4 layers
   num_heads: 8       # Paper: 8 attention heads
-  dropout: 0.1       # Paper: dropout is set to 0.1
-  d_model: 256
+  dropout: 0.1       # Paper: dropout=0.1
   
-  # LoRA Adapter Configuration
-  lora_r: 8          # Paper: rank=8
-  lora_alpha: 32     # Paper: alpha=32
-  lora_dropout: 0.05 # Paper: dropout=0.05
+  # LoRA Adapter Configuration (for multitask pipeline)
+  lora_r: 8
+  lora_alpha: 32
+  lora_dropout: 0.05
+
+# OOD Improvement Techniques
+ood_techniques:
+  mixup_alpha: 0.2     # Mixup blending (0=off, 0.2=recommended)
+  swa_epochs: 20       # SWA epochs after training (0=off)
+  swa_lr: 1e-4         # SWA learning rate
+  label_smoothing: 0.0  # Label smoothing (0=off)

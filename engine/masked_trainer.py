@@ -1,366 +1,383 @@
-import copy
 import os
-import time
-
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+import json
 import torch
-from torch.optim.lr_scheduler import LambdaLR
-from tqdm import tqdm
-
-from engine.base_trainer import BaseTrainer
-
-torch.backends.cudnn.benchmark = True
-
-def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
-    """Warmup learning rate scheduler with cosine annealing."""
-
-    def lr_lambda(epoch):
-        if epoch < warmup_epochs:
-            return (epoch + 1) / max(1, warmup_epochs)
-        else:
-            progress = (epoch - warmup_epochs) / max(
-                1, total_epochs - warmup_epochs
-            )
-            cosine = 0.5 * (1 + np.cos(np.pi * progress))
-            return min_lr_ratio + (1 - min_lr_ratio) * cosine
-
-    return LambdaLR(optimizer, lr_lambda)
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+from torch.cuda.amp import autocast, GradScaler
+from load.data_augmentation import CSIAugmentation
 
 
-class MaskedTrainer(BaseTrainer):
-    """Trainer for masked self-supervised CSI pretraining."""
+def compute_padding_mask(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    """
+    Detect zero-padded subcarrier columns in CSI data.
+
+    Args:
+        x: Input tensor of shape [B, 1, T, F] or [B, T, F]
+        eps: Threshold below which a column is considered padding
+
+    Returns:
+        pad_mask: BoolTensor of shape [B, T, F]
+                  True  = padding (should be IGNORED)
+                  False = real signal (should be used)
+    """
+    if x.dim() == 4:
+        x = x.squeeze(1)  # [B, T, F]
+
+    # A subcarrier column is padding if ALL time steps are near-zero
+    # Sum absolute values over the time axis
+    col_energy = x.abs().sum(dim=1)  # [B, F]
+
+    # Expand back to [B, T, F] so we can use it as a per-position mask
+    pad_cols = col_energy < eps  # [B, F]  True = padding column
+    pad_mask = pad_cols.unsqueeze(1).expand_as(x)  # [B, T, F]
+
+    return pad_mask  # True where padding
+
+
+def create_padding_aware_mask(
+    x: torch.Tensor,
+    mask_ratio: float = 0.75,
+    block_size: int = 4,
+) -> torch.Tensor:
+    """Vectorized padding-aware mask — no Python loops over patches."""
+    if x.dim() == 4:
+        x_3d = x.squeeze(1)
+    else:
+        x_3d = x
+
+    B, T, F = x_3d.shape
+    device = x_3d.device
+
+    # Which subcarrier columns are real signal? [B, F]
+    valid_f = (x_3d.abs().sum(dim=1) > 1e-6)  # [B, F]
+
+    # Collapse time into blocks: [B, n_blocks, F]
+    n_blocks = T // block_size
+    T_blocked = n_blocks * block_size
+    x_blocked = x_3d[:, :T_blocked, :].reshape(B, n_blocks, block_size, F)
+    valid_blocks = (x_blocked.abs().sum(dim=(2, 3)) > 1e-6)  # [B, n_blocks] — blocks with any signal
+
+    # For each sample, randomly mask mask_ratio of VALID (block, subcarrier) pairs
+    # Generate uniform noise and set invalid positions to 2.0 (they'll never be top-k)
+    noise = torch.rand(B, n_blocks, F, device=device)
+    
+    # Invalid = padding block OR padding subcarrier
+    invalid = (~valid_blocks.unsqueeze(2)) | (~valid_f.unsqueeze(1))  # [B, n_blocks, F]
+    noise[invalid] = 2.0  # push padding positions out of the random selection
+
+    # Count valid patches per sample, compute how many to mask
+    n_valid = (~invalid).float().sum(dim=(1, 2))  # [B]
+    n_mask = (n_valid * mask_ratio).long().clamp(min=1)  # [B]
+
+    # Flatten noise to [B, n_blocks*F], argsort to get ranking
+    noise_flat = noise.reshape(B, -1)  # [B, n_blocks*F]
+    ids_shuffle = torch.argsort(noise_flat, dim=1)  # ascending: lowest noise = masked first
+
+    # Build mask: positions with rank < n_mask are masked
+    ranks = torch.argsort(ids_shuffle, dim=1)  # [B, n_blocks*F]
+    mask_flat = (ranks < n_mask.unsqueeze(1)).float()  # [B, n_blocks*F]
+    mask_blocked = mask_flat.reshape(B, n_blocks, F)  # [B, n_blocks, F]
+
+    # Expand blocks back to full time resolution [B, T, F]
+    signal_mask = mask_blocked.unsqueeze(2).expand(B, n_blocks, block_size, F)
+    signal_mask = signal_mask.reshape(B, T_blocked, F)
+
+    # Pad remaining time steps with zeros if T wasn't divisible by block_size
+    if T_blocked < T:
+        pad = torch.zeros(B, T - T_blocked, F, device=device)
+        signal_mask = torch.cat([signal_mask, pad], dim=1)
+
+    return signal_mask  # [B, T, F]
+
+def padding_aware_reconstruction_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    signal_mask: torch.Tensor,
+    pad_mask: torch.Tensor,
+    norm_pix_loss: bool = True,
+) -> torch.Tensor:
+    """
+    Compute MSE reconstruction loss ONLY over:
+      - positions that were masked during pretraining  (signal_mask == 1)
+      - positions that are NOT padding                 (pad_mask == False)
+
+    Args:
+        pred:        [B, T, F]  model output
+        target:      [B, T, F]  original (unmasked) input
+        signal_mask: [B, T, F]  1 = was masked
+        pad_mask:    [B, T, F]  True = is padding
+        norm_pix_loss: normalize target patch variance (helps training stability)
+
+    Returns:
+        Scalar loss
+    """
+    # Only reconstruct masked, non-padding positions
+    valid = signal_mask * (~pad_mask).float()  # [B, T, F]
+
+    if norm_pix_loss:
+        # Normalize target values by the mean/var of the valid region per sample
+        # This prevents large-amplitude subcarriers from dominating the loss
+        mean = (target * valid).sum(dim=(1, 2), keepdim=True) / \
+               (valid.sum(dim=(1, 2), keepdim=True) + 1e-8)
+        var  = ((target - mean) ** 2 * valid).sum(dim=(1, 2), keepdim=True) / \
+               (valid.sum(dim=(1, 2), keepdim=True) + 1e-8)
+        target = (target - mean) / (var + 1e-8).sqrt()
+
+    loss = ((pred - target) ** 2 * valid).sum() / (valid.sum() + 1e-8)
+    return loss
+
+
+def build_transformer_key_padding_mask(
+    pad_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Convert a per-position padding mask [B, T, F] to a per-timestep key_padding_mask
+    suitable for nn.TransformerEncoder.
+
+    A timestep is considered padding if ALL its subcarrier values are padded.
+
+    Args:
+        pad_mask: [B, T, F]  True = padding
+
+    Returns:
+        key_padding_mask: [B, T]  True = this time position should be ignored
+    """
+    # A time step is "all padding" if every subcarrier is padding
+    return pad_mask.all(dim=-1)  # [B, T]
+
+
+class MaskedTrainer:
+    """
+    Trainer for masked CSI autoencoder pretraining.
+
+    Key features vs. naive implementation:
+    - Padding-aware masking: only masks real signal, not zero-padded subcarriers
+    - Padding-aware loss: only backprops on masked non-padding positions
+    - Passes a key_padding_mask to the transformer so attention ignores padding
+    - Optional mixed-precision training
+    """
 
     def __init__(
         self,
-        model,
+        model: nn.Module,
         train_loader,
-        val_loader=None,
-        criterion=None,
-        optimizer=None,
-        scheduler=None,
-        device="cuda:0",
-        save_path="./results",
-        checkpoint_path=None,
-        config=None,
-        distributed=False,
-        local_rank=0,
+        val_loader,
+        optimizer,
+        scheduler,
+        device,
+        save_path: str,
+        config,
     ):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
-        self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.device = device
         self.save_path = save_path
-        self.checkpoint_path = checkpoint_path
         self.config = config
-        self.distributed = distributed
-        self.local_rank = local_rank
 
-        if not distributed or local_rank == 0:
-            os.makedirs(save_path, exist_ok=True)
+        self.mask_ratio   = getattr(config, 'mask_ratio',   0.75)
+        self.block_size   = getattr(config, 'block_size',   4)
+        self.patience     = getattr(config, 'patience',     20)
+        self.norm_pix_loss = getattr(config, 'norm_pix_loss', True)
+        self.use_amp      = getattr(config, 'use_amp', torch.cuda.is_available())
 
-        self.model.to(self.device)
+        self.scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
+        self.history = []
+        self.best_val_loss = float('inf')
+        self.best_epoch    = 0
+        self.no_improve    = 0
+        self.augment = CSIAugmentation()
 
-        if optimizer is None:
-            lr = getattr(config, "lr", 1e-3)
-            wd = getattr(config, "weight_decay", 0.0)
-            self.optimizer = torch.optim.AdamW(
-                self.model.parameters(),
-                lr=lr,
-                weight_decay=wd,
+
+    # ------------------------------------------------------------------
+    # Core training step
+    # ------------------------------------------------------------------
+
+    def _step(self, batch, train: bool = True):
+        """
+        Single forward + (optionally) backward pass.
+
+        Returns scalar loss value.
+        """
+        # Support datasets that return (x, label) or just x
+        if isinstance(batch, (list, tuple)):
+            x = batch[0]
+        else:
+            x = batch
+
+        x = x.to(self.device, non_blocking=True)
+        if train:
+            x = self.augment(x)
+
+        # ---- Build masks ----
+        pad_mask    = compute_padding_mask(x)          # [B, T, F]  True=padding
+        signal_mask = create_padding_aware_mask(
+            x,
+            mask_ratio=self.mask_ratio,
+            block_size=self.block_size,
+        )                                               # [B, T, F]  1=masked
+
+        # ---- Apply mask to input (zero out masked positions) ----
+        x_3d = x.squeeze(1) if x.dim() == 4 else x    # [B, T, F]
+        x_masked = x_3d * (1 - signal_mask)            # zero out masked positions
+
+        # Rebuild [B, 1, T, F] for models that expect a channel dim
+        x_masked_4d = x_masked.unsqueeze(1)
+
+        # ---- Build key_padding_mask for transformer attention ----
+        # Shape [B, T] — True means "ignore this timestep"
+        key_pad = build_transformer_key_padding_mask(pad_mask)  # [B, T]
+
+        # ---- Forward pass ----
+        with torch.amp.autocast('cuda', enabled=self.use_amp):
+            # Pass key_padding_mask only if the model accepts it
+            try:
+                pred = self.model(x_masked_4d, key_padding_mask=key_pad)
+            except TypeError:
+                pred = self.model(x_masked_4d)
+
+            # pred shape: [B, T, F]
+            loss = padding_aware_reconstruction_loss(
+                pred        = pred,
+                target      = x_3d,
+                signal_mask = signal_mask,
+                pad_mask    = pad_mask,
+                norm_pix_loss = self.norm_pix_loss,
             )
 
-        if scheduler is None:
-            warmup_epochs = getattr(config, "warmup_epochs", 5)
-            total_epochs = getattr(config, "epochs", 100)
-            self.scheduler = warmup_cosine_lr(
-                self.optimizer,
-                warmup_epochs=warmup_epochs,
-                total_epochs=total_epochs,
-            )
-
-        self.train_losses = []
-        self.val_losses = []
-        self.best_epoch = 0
-
-    # -------------------------------------------------
-    # TRAIN LOOP
-    # -------------------------------------------------
-
-    def train(self):
-
-        epochs = getattr(self.config, "epochs", 30)
-        patience = getattr(self.config, "patience", 15)
-
-        best_val_loss = float("inf")
-        best_model = None
-        epochs_no_improve = 0
-        records = []
-
-        for epoch in range(epochs):
-            self.current_epoch = epoch
-
-            if not self.distributed or self.local_rank == 0:
-                print(f"\nEpoch {epoch + 1}/{epochs}")
-
-            train_loss, train_time = self.train_epoch()
-            val_loss = (
-                self.evaluate(self.val_loader)
-                if self.val_loader
-                else train_loss
-            )
-
-            self.train_losses.append(train_loss)
-            self.val_losses.append(val_loss)
-
-            # step scheduler is now done per batch in train_epoch()
-
-            if not self.distributed or self.local_rank == 0:
-                print(f"Train Loss: {train_loss:.6f}")
-                print(f"Val Loss:   {val_loss:.6f}")
-                print(f"Time/sample: {train_time:.6f}s")
-
-                records.append(
-                    {
-                        "Epoch": epoch + 1,
-                        "Train Loss": train_loss,
-                        "Val Loss": val_loss,
-                        "Time per sample": train_time,
-                    }
-                )
-
-            # ----- Early Stopping -----
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model = copy.deepcopy(self.model.state_dict())
-                self.best_epoch = epoch + 1
-                epochs_no_improve = 0
+        # ---- Backward pass ----
+        if train:
+            self.optimizer.zero_grad()
+            if self.use_amp and self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
             else:
-                epochs_no_improve += 1
-                if epochs_no_improve >= patience:
-                    print("Early stopping triggered.")
-                    break
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
 
-        if best_model is not None:
-            self.model.load_state_dict(best_model)
+            if self.scheduler is not None:
+                self.scheduler.step()
 
-        if not self.distributed or self.local_rank == 0:
-            results_df = pd.DataFrame(records)
-            results_df.to_csv(
-                os.path.join(self.save_path, "training_results.csv"),
-                index=False,
-            )
-            self.plot_training_results()
+        return loss.item()
 
-        return self.model, {
-            "train_loss_history": self.train_losses,
-            "val_loss_history": self.val_losses,
-            "best_epoch": self.best_epoch,
-            "best_val_loss": best_val_loss,
-        }
+    # ------------------------------------------------------------------
+    # Epoch loops
+    # ------------------------------------------------------------------
 
-    # -------------------------------------------------
-    # TRAIN ONE EPOCH
-    # -------------------------------------------------
-
-    def train_epoch(self):
-
+    def _train_epoch(self):
         self.model.train()
         total_loss = 0.0
-        total_samples = 0
-        total_time = 0.0
+        n_batches  = 0
 
-        loader = tqdm(self.train_loader, leave=False)
-        first = True
-        for batch in loader:
-            inputs = batch[0]
-            if inputs.size(0) == 0:
-                continue
 
-            start_time = time.perf_counter()
+        for batch in self.train_loader:
+            if isinstance(batch, (list, tuple)) and batch[0].shape[0] == 0:
+                continue  # skip empty batches from collate_skip_none
 
-            inputs = inputs.to(self.device)
-            if inputs.dim() == 3:
-                inputs = inputs.unsqueeze(1)
-            B = inputs.size(0)
-            total_samples += B
+            loss_val = self._step(batch, train=True)
+            total_loss += loss_val
+            n_batches  += 1
 
-            masked_inputs, mask = self.apply_mask(inputs)
+        return total_loss / max(n_batches, 1)
 
-            if first and self.current_epoch == 0:
-                self.visualize_mask(inputs, masked_inputs, mask)
-                first = False
-
-            self.optimizer.zero_grad()
-            outputs = self.model(masked_inputs)
-            targets = inputs.squeeze(1)
-            mask_sq = mask.squeeze(1)
-
-            loss = self.compute_masked_loss(outputs, targets, mask_sq)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
-
-            # step scheduler per batch (step-level cosine warmup)
-            self.scheduler.step()
-
-            total_loss += loss.item() * B
-            total_time += time.perf_counter() - start_time
-
-            loader.set_postfix(loss=loss.item())
-
-        if total_samples == 0:
-            return 0.0, 0.0
-
-        # Distributed reduction
-        if self.distributed and torch.distributed.is_initialized():
-            metrics = torch.tensor(
-                [total_loss, total_time, total_samples],
-                device=self.device,
-            )
-            torch.distributed.all_reduce(
-                metrics, op=torch.distributed.ReduceOp.SUM
-            )
-            total_loss, total_time, total_samples = metrics.tolist()
-
-        epoch_loss = total_loss / total_samples
-        time_per_sample = total_time / total_samples
-
-        return epoch_loss, time_per_sample
-
-    # -------------------------------------------------
-    # EVALUATE
-    # -------------------------------------------------
-
-    def evaluate(self, loader):
-
-        if loader is None:
-            return 0.0
-
+    @torch.no_grad()
+    def _val_epoch(self):
         self.model.eval()
         total_loss = 0.0
-        total_samples = 0
+        n_batches  = 0
 
-        with torch.no_grad():
-            for batch in loader:
-                inputs = batch[0]
-                if inputs.size(0) == 0:
-                    continue
+        for batch in self.val_loader:
+            if isinstance(batch, (list, tuple)) and batch[0].shape[0] == 0:
+                continue
 
-                inputs = inputs.to(self.device)
-                if inputs.dim() == 3:
-                    inputs = inputs.unsqueeze(1)
-                B = inputs.size(0)
-                total_samples += B
+            loss_val = self._step(batch, train=False)
+            total_loss += loss_val
+            n_batches  += 1
 
-                masked_inputs, mask = self.apply_mask(inputs)
-                outputs = self.model(masked_inputs)
-                targets = inputs.squeeze(1)
-                mask_sq = mask.squeeze(1)
+        return total_loss / max(n_batches, 1)
 
-                loss = self.compute_masked_loss(outputs, targets, mask_sq)
+    # ------------------------------------------------------------------
+    # Main training loop
+    # ------------------------------------------------------------------
 
-                total_loss += loss.item() * B
+    def train(self):
+        epochs = getattr(self.config, 'epochs', 100)
 
-        if total_samples == 0:
-            return 0.0
+        print(f"Padding-aware masked pretraining | mask_ratio={self.mask_ratio} "
+              f"block_size={self.block_size} norm_pix_loss={self.norm_pix_loss}")
+        print(f"Mixed precision: {self.use_amp}\n")
 
-        if self.distributed and torch.distributed.is_initialized():
-            metrics = torch.tensor(
-                [total_loss, total_samples],
-                device=self.device,
-            )
-            torch.distributed.all_reduce(
-                metrics, op=torch.distributed.ReduceOp.SUM
-            )
-            total_loss, total_samples = metrics.tolist()
+        for epoch in range(1, epochs + 1):
+            train_loss = self._train_epoch()
+            val_loss   = self._val_epoch()
 
-        return total_loss / total_samples
+            row = {'epoch': epoch, 'train_loss': train_loss, 'val_loss': val_loss}
+            self.history.append(row)
 
-    # -------------------------------------------------
-    # PLOTTING
-    # -------------------------------------------------
+            improved = val_loss < self.best_val_loss
+            marker   = " ✓" if improved else ""
+            print(f"Epoch {epoch:>3}/{epochs}  train={train_loss:.6f}  val={val_loss:.6f}{marker}")
 
-    def plot_training_results(self):
+            if improved:
+                self.best_val_loss = val_loss
+                self.best_epoch    = epoch
+                self.no_improve    = 0
+                # Save best checkpoint
+                torch.save(self.model.state_dict(),
+                           os.path.join(self.save_path, "best_model.pt"))
+            else:
+                self.no_improve += 1
+                if self.no_improve >= self.patience:
+                    print(f"\nEarly stopping at epoch {epoch} "
+                          f"(no improvement for {self.patience} epochs)")
+                    break
 
-        plt.figure(figsize=(8, 5))
-        plt.plot(self.train_losses, label="Train")
-        plt.plot(self.val_losses, label="Validation")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.title("Masked Pretraining Loss")
+        # Reload best weights
+        best_ckpt = os.path.join(self.save_path, "best_model.pt")
+        if os.path.exists(best_ckpt):
+            self.model.load_state_dict(torch.load(best_ckpt, map_location=self.device))
+            print(f"\nReloaded best model from epoch {self.best_epoch}")
+
+        self._save_history()
+        self._plot_loss()
+
+        return self.model, {
+            'best_epoch':    self.best_epoch,
+            'best_val_loss': self.best_val_loss,
+            'history':       self.history,
+        }
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def _save_history(self):
+        path = os.path.join(self.save_path, "train_history.json")
+        with open(path, 'w') as f:
+            json.dump(self.history, f, indent=2)
+
+    def _plot_loss(self):
+        epochs     = [r['epoch']      for r in self.history]
+        train_loss = [r['train_loss'] for r in self.history]
+        val_loss   = [r['val_loss']   for r in self.history]
+
+        plt.figure(figsize=(8, 4))
+        plt.plot(epochs, train_loss, label='Train Loss')
+        plt.plot(epochs, val_loss,   label='Val Loss')
+        plt.axvline(self.best_epoch, color='red', linestyle='--',
+                    label=f'Best epoch ({self.best_epoch})')
+        plt.xlabel('Epoch')
+        plt.ylabel('Reconstruction Loss')
+        plt.title('Masked CSI Pretraining (Padding-Aware)')
         plt.legend()
-        plt.grid(True)
-
-        plt.savefig(os.path.join(self.save_path, "training_curve.png"))
-        plt.close()
-
-    # -------------------------------------------------
-    # MASKING
-    # -------------------------------------------------
-
-    def apply_mask(self, inputs, patch_size_t=16, patch_size_f=16, mask_ratio=0.75):
-        B, C, T, F = inputs.shape
-        device = inputs.device
-
-        n_t = T // patch_size_t
-        n_f = F // patch_size_f
-        num_patches = n_t * n_f
-
-        # Create random mask per batch (patch-level)
-        noise = torch.rand(B, num_patches, device=device)
-        ids_shuffle = torch.argsort(noise, dim=1)
-
-        num_mask = int(mask_ratio * num_patches)
-
-        patch_mask = torch.zeros(B, num_patches, device=device)
-        patch_mask.scatter_(1, ids_shuffle[:, :num_mask], 1)
-
-        # Expand to pixel-level mask
-        patch_mask = patch_mask.view(B, n_t, n_f)
-
-        mask = patch_mask.repeat_interleave(patch_size_t, dim=1)
-        mask = mask.repeat_interleave(patch_size_f, dim=2)
-
-        mask = mask.unsqueeze(1)  # (B, 1, T', F')
-
-        # If T or F not divisible, pad mask
-        full_mask = torch.zeros(B, 1, T, F, device=device)
-        full_mask[:, :, :mask.shape[2], :mask.shape[3]] = mask
-
-        masked_inputs = inputs * (1 - full_mask)
-
-        return masked_inputs, full_mask
-
-    def compute_masked_loss(self, outputs, targets, mask):
-        diff = (outputs - targets) ** 2
-        loss = (diff * mask).sum() / (mask.sum() + 1e-8)
-        return loss
-
-    def visualize_mask(self, inputs, masked_inputs, mask, sample_idx=0):
-        """
-        Visualize original, masked, and mask for one sample.
-        Assumes (B, C, T, F) and C=1 for plotting.
-        """
-
-        original = inputs[sample_idx, 0].detach().cpu()
-        masked = masked_inputs[sample_idx, 0].detach().cpu()
-        mask_img = mask[sample_idx, 0].detach().cpu()
-
-        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-
-        axes[0].imshow(original, aspect="auto", origin="lower")
-        axes[0].set_title("Original CSI")
-
-        axes[1].imshow(masked, aspect="auto", origin="lower")
-        axes[1].set_title("Masked CSI")
-
-        axes[2].imshow(mask_img, aspect="auto", origin="lower")
-        axes[2].set_title("Mask (1 = masked)")
-
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_path, "mask_visualization.png"))
+        plt.savefig(os.path.join(self.save_path, "loss_curve.png"), dpi=120)
+        plt.close()
+        print(f"Loss curve saved to {self.save_path}/loss_curve.png")

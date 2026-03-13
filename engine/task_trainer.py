@@ -20,6 +20,8 @@ from utils.labels import normalize_labels
 from utils.logging import log_epoch
 from utils.training import predict_from_outputs
 
+from load.data_augmentation import CSIAugmentation
+
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
     """Warmup learning rate scheduler with cosine annealing."""
@@ -93,6 +95,10 @@ class TaskTrainer(BaseTrainer):
         self.config = config
         self.distributed = distributed
         self.local_rank = local_rank
+        self.augment = CSIAugmentation()
+        self.mixup_alpha = getattr(config, 'mixup_alpha', 0.0) if config else 0.0
+        if self.mixup_alpha > 0:
+            print(f"Mixup enabled with alpha={self.mixup_alpha}")
 
         # create directory if it doesn't exist
         if not distributed or (distributed and local_rank == 0):
@@ -111,7 +117,7 @@ class TaskTrainer(BaseTrainer):
             self.optimizer = torch.optim.AdamW(
                 self.model.parameters(),
                 lr=getattr(config, "lr", 1e-3),
-                weight_decay=getattr(config, "weight_decay", 0.0),
+                weight_decay=float(getattr(config, "weight_decay", 0.0)),
             )
         else:
             self.optimizer = optimizer
@@ -330,6 +336,7 @@ class TaskTrainer(BaseTrainer):
 
             # transfer to device
             inputs = inputs.to(self.device)
+            inputs = self.augment(inputs)
 
             labels = normalize_labels(
                 labels=labels,
@@ -340,9 +347,18 @@ class TaskTrainer(BaseTrainer):
 
             # forward pass
             self.optimizer.zero_grad()
-            outputs = self.model(inputs)
 
-            loss = self.criterion(outputs, labels)
+            # Apply Mixup if enabled
+            if self.mixup_alpha > 0 and self.model.training:
+                lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+                lam = max(lam, 1 - lam)  # ensure lam >= 0.5 so original dominates
+                idx = torch.randperm(batch_size, device=self.device)
+                mixed_inputs = lam * inputs + (1 - lam) * inputs[idx]
+                outputs = self.model(mixed_inputs)
+                loss = lam * self.criterion(outputs, labels) + (1 - lam) * self.criterion(outputs, labels[idx])
+            else:
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
 
             # backward pass
             loss.backward()
