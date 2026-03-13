@@ -7,7 +7,7 @@ import pandas as pd
 from torch.utils.data import Dataset
 import torch
 import torch.nn.functional as F
-
+from pathlib import Path
 
 class CSIDataset(Dataset):
     """
@@ -39,6 +39,18 @@ class CSIDataset(Dataset):
         self.label_column = label_column
         self.data_key = data_key
         self.debug = debug
+        # self.device_to_idx = {
+        #     "AmazonPlug": 0,
+        #     "GoveePlug": 1,
+        #     "WyzePlug": 2,
+        #     "EightreePlug": 3,
+        #     "EchoPlus": 4,
+        #     "GoogleNest": 5,
+        #     "AppleHomePod": 6,
+        #     "EchoSpot": 7,
+        #     "EchoShow8": 8,
+
+        # }
 
         # if task directory provided then try to use it
         if task_dir is not None and os.path.isdir(task_dir):
@@ -109,9 +121,26 @@ class CSIDataset(Dataset):
         try:
             row = self.split_metadata.iloc[index]
 
+            
+
             # path within metadata is relative to task directory
             subPath = row["file_path"]
             fullPath = os.path.normpath(os.path.join(self.task_dir, subPath))
+
+            # domain initialization
+            domain = {"user": None, "env": None, "device": None}
+
+            # go through parts of path to get each of the above domains
+            path_parts = Path(fullPath).parts
+
+            for part in path_parts:
+                if part.startswith("user_"):
+                    domain["user"] = int(part.split("_U", 1)[1])
+                elif part.startswith("env_"):
+                    domain["env"] = (part.split("_E", 1)[1])
+                elif part.startswith("device_"):
+                    domain["device"] = part.split("_", 1)[1]
+
 
             # load in .h5 files (only working with this rn)
             csi_data = None
