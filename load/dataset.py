@@ -128,18 +128,18 @@ class CSIDataset(Dataset):
             fullPath = os.path.normpath(os.path.join(self.task_dir, subPath))
 
             # domain initialization
-            domain = {"user": None, "env": None, "device": None}
+            # domain = {"user": None, "env": None, "device": None}
 
-            # go through parts of path to get each of the above domains
-            path_parts = Path(fullPath).parts
+            # # go through parts of path to get each of the above domains
+            # path_parts = Path(fullPath).parts
 
-            for part in path_parts:
-                if part.startswith("user_"):
-                    domain["user"] = int(part.split("_U", 1)[1])
-                elif part.startswith("env_"):
-                    domain["env"] = (part.split("_E", 1)[1])
-                elif part.startswith("device_"):
-                    domain["device"] = part.split("_", 1)[1]
+            # for part in path_parts:
+            #     if part.startswith("user_"):
+            #         domain["user"] = int(part.split("_U", 1)[1])
+            #     elif part.startswith("env_"):
+            #         domain["env"] = (part.split("_E", 1)[1])
+            #     elif part.startswith("device_"):
+            #         domain["device"] = part.split("_", 1)[1]
 
 
             # load in .h5 files (only working with this rn)
