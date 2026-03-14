@@ -316,15 +316,18 @@ class CPCTrainer(BaseTrainer):
         
         loss = 0.0
         
-        # Pre-compute user mappings outside the loop
+        # Pre-compute user mappings outside the loop (use Python ints so dict lookup is reliable)
         if users is not None:
-            # Check edge case: The entire batch is from a single user
-            if len(set(users)) <= 1:
-                # Fallback: treat each sequence in the batch as an independent identity
+            if torch.is_tensor(users):
+                users_list = users.cpu().tolist()
+            else:
+                users_list = [int(u) if torch.is_tensor(u) else u for u in users]
+            unique = set(users_list)
+            if len(unique) <= 1:
                 user_ids = torch.arange(B, device=self.device)
             else:
-                user_to_id = {u: i for i, u in enumerate(set(users))}
-                user_ids = torch.tensor([user_to_id[u] for u in users], device=self.device)
+                user_to_id = {u: i for i, u in enumerate(sorted(unique))}
+                user_ids = torch.tensor([user_to_id[u] for u in users_list], device=self.device)
         else:
             user_ids = torch.arange(B, device=self.device)
             

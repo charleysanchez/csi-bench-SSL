@@ -185,38 +185,33 @@ class TransformerClassifier(nn.Module):
             'win_len': self.win_len
         }
     
-    def _get_state_dict(self):
-        """Get state_dict but exclude dynamically created input_proj if it's different from the initial one"""
-        state_dict = super(TransformerClassifier, self).state_dict()
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        """Override state_dict to handle dynamically created input_proj"""
+        # Get the standard state_dict from parent
+        state_dict = super(TransformerClassifier, self).state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        
         # If the input_proj has been dynamically created with a different size, exclude it
         if hasattr(self.input_proj, 'in_features') and self.input_proj.in_features != self.feature_size:
-            # Remove input_proj keys since they'll be dynamically created based on actual input
-            keys_to_remove = [k for k in state_dict.keys() if k.startswith('input_proj')]
+            # Remove keys corresponding to input_proj with the correct prefix
+            keys_to_remove = [k for k in state_dict.keys() if k == f"{prefix}input_proj.weight" or k == f"{prefix}input_proj.bias"]
             for key in keys_to_remove:
                 del state_dict[key]
         return state_dict
     
-    def state_dict(self, *args, **kwargs):
-        """Override state_dict to handle dynamically created input_proj"""
-        return self._get_state_dict()
-    
     def load_state_dict(self, state_dict, strict=True):
         """Override load_state_dict to handle potentially missing input_proj"""
-        # Check for input_proj keys
-        input_proj_keys = [k for k in state_dict.keys() if k.startswith('input_proj')]
+        # Check for input_proj keys (allowing for prefixes)
+        input_proj_keys = [k for k in state_dict.keys() if "input_proj" in k]
         
-        # If the state_dict has input_proj but with a different size, skip those keys
+        # If the state_dict is missing input_proj, skip strictness for those
         if not input_proj_keys:
-            # Create a new state dict excluding input_proj keys from current model
-            model_state_dict = self.state_dict()
-            # Load the rest of the state dict normally
             return super(TransformerClassifier, self).load_state_dict(state_dict, strict=False)
         else:
             # Try normal loading
             try:
                 return super(TransformerClassifier, self).load_state_dict(state_dict, strict=strict)
             except RuntimeError as e:
-                # If error due to input_proj, try loading without strict
+                # If error due to input_proj mismatch, try loading without strict
                 if "input_proj" in str(e):
                     return super(TransformerClassifier, self).load_state_dict(state_dict, strict=False)
                 raise e
@@ -1068,3 +1063,100 @@ class CPCModel(nn.Module):
             
         return z, c, preds
 
+from torch.autograd import Function
+class GradientReversalFunction(Function):
+    """
+    Gradient Reversal Layer from:
+    Unsupervised Domain Adaptation by Backpropagation (Ganin & Lempitsky, 2015)
+    
+    Forward pass: identity function (passes input through unchanged)
+    Backward pass: reverses the gradient and scales it by a negative constant (alpha)
+    """
+    @staticmethod
+    def forward(ctx, x, alpha):
+        ctx.alpha = alpha
+        return x.view_as(x)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        output = grad_output.neg() * ctx.alpha
+        return output, None
+    
+
+class RevGrad(nn.Module):
+    """
+    A PyTorch module wrapper for the GradientReversalFunction.
+    """
+    def __init__(self, alpha=1.0):
+        super().__init__()
+        self.alpha = alpha
+
+    def forward(self, input_):
+        return GradientReversalFunction.apply(input_, self.alpha)
+    
+
+class DANNTransformer(nn.Module):
+    def __init__(self, 
+                 base_encoder,          # e.g., your existing TransformerEncoder 
+                 embed_dim=256,         # The output dimension of the base_encoder
+                 num_classes=6,         # Main task (e.g. Activities)
+                 num_users=64,          # Based on your dataset users
+                 num_envs=26,           # Based on your dataset environments
+                 num_devices=36,        # Based on your dataset devices
+                 grl_alpha=1.0):        # The gradient reversal multiplier
+        super().__init__()
+
+        self.encoder = base_encoder
+
+        # main task head - activity classifier
+        self.main_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(embed_dim // 2, num_classes)
+        )
+
+        # domain adversarial heads
+        # GRL
+        self.grl = RevGrad(alpha=grl_alpha)
+
+        # user domain head
+        self.user_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim // 2, num_users)
+        )
+
+        # environment domain head
+        self.env_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim // 2, num_envs)
+        )
+
+        # device domain head
+        self.device_head = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.ReLU(),
+            nn.Linear(embed_dim // 2, num_devices)
+        )
+
+    def forward(self, x, return_domains=False):
+        # regular forward pass from base encoder to get features
+        features = self.encoder(x)
+
+        # main task prediction (standard forward pass)
+        main_logits = self.main_head(features)
+
+        if not return_domains:
+            return main_logits
+        
+        # apply gradient reversal
+        reversed_features = self.grl(features)
+
+        # domain predictions
+        user_logits = self.user_head(reversed_features)
+        env_logits = self.env_head(reversed_features)
+        device_logits = self.device_head(reversed_features)
+
+        return main_logits, user_logits, env_logits, device_logits

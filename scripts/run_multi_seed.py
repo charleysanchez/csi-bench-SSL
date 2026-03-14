@@ -4,22 +4,47 @@
 Since the experiment_id is derived from a hash of params (not seed),
 all seeds overwrite the same dir. We capture results immediately after
 each run completes.
+
+Usage:
+    python scripts/run_multi_seed.py --task FallDetection --model timesformer1d --config configs/paper_low_lr.yaml
+    python scripts/run_multi_seed.py --task FallDetection --model timesformer1d --encoder path/to/encoder.pt --seed_start 42 --seed_end 57
 """
 import subprocess
 import json
 import os
 import sys
 import glob
+import argparse
 import numpy as np
 
-# Configuration
-SEEDS = list(range(42, 142))  # 15 seeds: 42-56
-CONFIG = "configs/paper_low_lr.yaml"
-ENCODER = "pretrain_results/all_tasks/timesformer1d/fe5af1b0dc/encoder_weights.pt"
-TASK = "FallDetection"
-MODEL = "timesformer1d"
-RESULTS_BASE = "results/FallDetection/timesformer1d"
-MULTI_SEED_DIR = "results/FallDetection/timesformer1d/multi_seed_results_zeropad"
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Run multi-seed supervised training and aggregate results.")
+    p.add_argument("--task", type=str, default="FallDetection", help="Task name")
+    p.add_argument("--model", type=str, default="timesformer1d", help="Model architecture")
+    p.add_argument("--config", type=str, default="configs/paper_low_lr.yaml", help="Path to YAML config")
+    p.add_argument("--encoder", type=str, default="pretrain_results/all_tasks/timesformer1d/fe5af1b0dc/encoder_weights.pt",
+                   help="Path to pretrained encoder .pt (omit or empty to train from scratch)")
+    p.add_argument("--results_base", type=str, default=None,
+                   help="Base dir for results (default: results/<task>/<model>)")
+    p.add_argument("--multi_seed_dir", type=str, default=None,
+                   help="Dir for multi-seed output JSON (default: <results_base>/multi_seed_results_zeropad)")
+    p.add_argument("--seed_start", type=int, default=42, help="First seed (inclusive)")
+    p.add_argument("--seed_end", type=int, default=57, help="Last seed (exclusive); e.g. 57 gives seeds 42..56")
+    p.add_argument("--save_dir", type=str, default="results", help="Passed to train_supervised --save_dir")
+    p.add_argument("--output_dir", type=str, default="results", help="Passed to train_supervised --output_dir")
+    p.add_argument("--num_workers", type=int, default=8, help="DataLoader workers")
+    return p.parse_args()
+
+
+args = parse_args()
+SEEDS = list(range(args.seed_start, args.seed_end))
+CONFIG = args.config
+ENCODER = args.encoder if args.encoder else None
+TASK = args.task
+MODEL = args.model
+RESULTS_BASE = args.results_base or os.path.join("results", TASK, MODEL)
+MULTI_SEED_DIR = args.multi_seed_dir or os.path.join(RESULTS_BASE, "multi_seed_results_zeropad")
 
 os.makedirs(MULTI_SEED_DIR, exist_ok=True)
 
@@ -34,13 +59,14 @@ for i, seed in enumerate(SEEDS):
         sys.executable, "scripts/train_supervised.py",
         "--task", TASK,
         "--model", MODEL,
-        "--pretrained_encoder", ENCODER,
         "--config", CONFIG,
-        "--save_dir", "results",
-        "--output_dir", "results",
-        "--num_workers", "8",
+        "--save_dir", args.save_dir,
+        "--output_dir", args.output_dir,
+        "--num_workers", str(args.num_workers),
         "--seed", str(seed),
     ]
+    if ENCODER:
+        cmd.extend(["--pretrained_encoder", ENCODER])
 
     result = subprocess.run(cmd, text=True)
 

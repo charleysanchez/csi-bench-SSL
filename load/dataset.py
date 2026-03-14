@@ -39,18 +39,45 @@ class CSIDataset(Dataset):
         self.label_column = label_column
         self.data_key = data_key
         self.debug = debug
-        # self.device_to_idx = {
-        #     "AmazonPlug": 0,
-        #     "GoveePlug": 1,
-        #     "WyzePlug": 2,
-        #     "EightreePlug": 3,
-        #     "EchoPlus": 4,
-        #     "GoogleNest": 5,
-        #     "AppleHomePod": 6,
-        #     "EchoSpot": 7,
-        #     "EchoShow8": 8,
 
-        # }
+        # Global deterministic domain mappings to ensure stable IDs across independent sets
+        # Mappings contain all known domains across all 8 sub-datasets.
+        GLOBAL_USER_MAPPING = [
+            'F01', 'F02', 'F03', 'F04', 'IR01', 'IR02', 'P01', 'P02', 'P03', 'P04', 'P05', 'P06', 
+            'P07', 'P08', 'P09', 'P10', 'P11', 'P12', 'P13', 'P14', 'P15', 'P16', 'P17', 'P18', 
+            'U01', 'U02', 'U03', 'U04', 'U05', 'U06', 'U07', 'U08', 'U09', 'U10', 'U11', 'U12', 
+            'U13', 'U14', 'U15', 'U16', 'U17', 'U18', 'U19', 'U20', 'U21', 'U22', 'U23', 'U24', 
+            'U25', 'U26', 'U27', 'U28', 'U29', 'U30', 'U31', 'U32', 'U33', 'U34', 'UM01', 'UM02', 
+            'UM03', 'UM04', 'UM05', 'UM06'
+        ]
+
+        GLOBAL_ENV_MAPPING = [
+            'E01', 'E02', 'E03', 'E04', 'E05', 'E06', 'E07', 'E08', 'E09', 'E10', 'E11', 'E12', 
+            'E13', 'E14', 'E15', 'E16', 'E17', 'E18', 'E19', 'E20', 'E21', 'E22', 'E23', 'E24', 
+            'E25', 'E26'
+        ]
+
+        GLOBAL_DEVICE_MAPPING = [
+            '1B31WA000383', '1B31WA000430', '1B31WA000514', 'AmazonPlug', 'AppleHomePod', 'ESP32', 
+            'EchoDot_2gen', 'EchoDot_3gen', 'EchoPlus', 'EchoShow8', 'EchoSpot', 'Echoplus', 
+            'EightreePlug', 'GoogleNestHub', 'Googlenest', 'GoveePlug', 'HP', 'Hex_1cd6be198931', 
+            'Hex_1cd6be198999', 'Hex_1cd6be198a27', 'Hex_1cd6be198a5f', 'Hex_1cd6be198a63', 
+            'Hex_1cd6be198a91', 'Hex_1cd6be198a97', 'Hex_1cd6be1df30d', 'Hex_1cd6be1df323', 
+            'Hex_1cd6be1df32b', 'Hex_1cd6be1df335', 'Hex_1cd6be1df36d', 'Hex_1cd6be1df3db', 
+            'Hex_1cd6be1df3e1', 'Hex_1cd6be1df4c7', 'Hex_1cd6be1df583', 'Hex_1cd6be1df605', 
+            'Lyra', 'WyzePlug', 'Unknown'
+        ]
+
+        self.user_to_idx = {name: idx for idx, name in enumerate(GLOBAL_USER_MAPPING)}
+        self.user_to_idx["Unknown"] = len(self.user_to_idx)
+        
+        self.env_to_idx = {name: idx for idx, name in enumerate(GLOBAL_ENV_MAPPING)}
+        self.env_to_idx["Unknown"] = len(self.env_to_idx)
+        
+        self.device_to_idx = {name: idx for idx, name in enumerate(GLOBAL_DEVICE_MAPPING)}
+        if "Unknown" not in self.device_to_idx:
+            self.device_to_idx["Unknown"] = len(self.device_to_idx)
+
 
         # if task directory provided then try to use it
         if task_dir is not None and os.path.isdir(task_dir):
@@ -127,19 +154,20 @@ class CSIDataset(Dataset):
             subPath = row["file_path"]
             fullPath = os.path.normpath(os.path.join(self.task_dir, subPath))
 
-            # domain initialization
-            # domain = {"user": None, "env": None, "device": None}
+            # domain initialization directly from metadata columns (more robust than parsing paths)
+            domain = {"user": None, "env": None, "device": None}
 
-            # # go through parts of path to get each of the above domains
-            # path_parts = Path(fullPath).parts
+            if 'user' in row and pd.notna(row['user']):
+                usr_str = str(row['user']).replace('user_', '')
+                domain["user"] = self.user_to_idx.get(usr_str, self.user_to_idx["Unknown"])
 
-            # for part in path_parts:
-            #     if part.startswith("user_"):
-            #         domain["user"] = int(part.split("_U", 1)[1])
-            #     elif part.startswith("env_"):
-            #         domain["env"] = (part.split("_E", 1)[1])
-            #     elif part.startswith("device_"):
-            #         domain["device"] = part.split("_", 1)[1]
+            if 'environment' in row and pd.notna(row['environment']):
+                env_str = str(row['environment']).replace('env_', '')
+                domain["env"] = self.env_to_idx.get(env_str, self.env_to_idx["Unknown"])
+
+            if 'device' in row and pd.notna(row['device']):
+                dev_str = str(row['device']).replace('device_', '')
+                domain["device"] = self.device_to_idx.get(dev_str, self.device_to_idx["Unknown"])
 
 
             # load in .h5 files (only working with this rn)
@@ -208,7 +236,11 @@ class CSIDataset(Dataset):
                     label_key = dec_to_bin.get(label_key, label_key)
             label_idx = self.label_mapper["label_to_idx"][label_key]
 
-            return csi_standardized, label_idx
+            u_id = domain["user"] if domain["user"] is not None else -1
+            e_id = domain["env"] if domain["env"] is not None else -1
+            d_id = domain["device"] if domain["device"] is not None else -1
+
+            return csi_standardized, label_idx, u_id, e_id, d_id
         except Exception as e:
             print(f"Error processing sample {index}: {str(e)}")
             return None

@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Ensure we can import from the project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scripts.train_supervised import MODEL_TYPES
+from model.registry import MODEL_TYPES
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run multi-seed evaluation on OOD tasks.")
@@ -22,6 +22,8 @@ def parse_args():
     parser.add_argument("--pipeline", type=str, default="supervised", choices=["supervised", "multitask"], help="Choose training approach.")
     parser.add_argument('--freeze_backbone', action="store_true", default=False,
                         help='freeze backbone to allow pretraining to work on its own.')
+    parser.add_argument('--use_dann', action='store_true',
+                    help='Enable Domain-Adversarial Neural Network (DANN) training')
     return parser.parse_args()
 
 args = parse_args()
@@ -101,6 +103,8 @@ if args.pipeline == "multitask":
         if CONFIG is not None: cmd.extend(["--config", CONFIG])
         if args.freeze_backbone:
             cmd.extend(["--freeze_backbone"])
+        if args.use_dann:
+            cmd.extend(["--use_dann"])
             
         result = subprocess.run(cmd, text=True)
         
@@ -212,6 +216,9 @@ elif args.pipeline == "supervised":
             
             if ENCODER is not None: cmd.extend(["--pretrained_encoder", ENCODER])
             if CONFIG is not None: cmd.extend(["--config", CONFIG])
+
+            if args.use_dann:
+                cmd.extend(["--use_dann"])
             
             result = subprocess.run(cmd, text=True)
             

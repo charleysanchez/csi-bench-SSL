@@ -22,7 +22,7 @@ from utils.training import predict_from_outputs, warmup_cosine_lr
 from load.data_augmentation import CSIAugmentation
 
 
-class TaskTrainer(BaseTrainer):
+class DannTrainer(BaseTrainer):
     """Trainer for supervised learning tasks with CSI data."""
 
     def __init__(
@@ -68,6 +68,7 @@ class TaskTrainer(BaseTrainer):
         self.val_loader = val_loader
         self.test_loader = test_loader
         self.criterion = criterion
+        self.criterion_domain = nn.CrossEntropyLoss(ignore_index=-1)
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.device = device
@@ -122,6 +123,14 @@ class TaskTrainer(BaseTrainer):
         self.val_accuracies = []
         self.best_val_accuracy = 0.0
         self.best_epoch = 0
+
+        # DANN specific tracking
+        self.grl_alpha = 0.0
+        self.domain_metrics = {
+            "user_acc": [],
+            "env_acc": [],
+            "device_acc": []
+        }
 
     def setup_scheduler(self):
         warmup_epochs = getattr(self.config, "warmup_epochs", 5)
@@ -307,9 +316,7 @@ class TaskTrainer(BaseTrainer):
             leave=False,
         )
 
-        for batch in loader:
-            # Handle variable-sized batches from dataset
-            inputs, labels = batch[0], batch[1]
+        for inputs, labels, user_labels, env_labels, device_labels in loader:
             # skip empty batches (from custom_collate_fn if all samples were None)
             if inputs.size(0) == 0:
                 continue
@@ -321,6 +328,7 @@ class TaskTrainer(BaseTrainer):
 
             # transfer to device
             inputs = inputs.to(self.device)
+            
             inputs = self.augment(inputs)
 
             labels = normalize_labels(
@@ -333,6 +341,15 @@ class TaskTrainer(BaseTrainer):
             # forward pass
             self.optimizer.zero_grad()
 
+            # Calculate dynamic alpha (scaling from 0 to 1)
+            # Following Ganin & Lempitsky (2015): alpha = 2 / (1 + exp(-10 * p)) - 1
+            p = float(self.current_epoch * len(self.train_loader) + total_samples // batch_size) / (
+                getattr(self.config, "epochs", 100) * len(self.train_loader)
+            )
+            self.grl_alpha = 2.0 / (1.0 + np.exp(-10 * p)) - 1
+            if hasattr(self.model, 'grl'):
+                self.model.grl.alpha = self.grl_alpha
+
             # Apply Mixup if enabled
             if self.mixup_alpha > 0 and self.model.training:
                 lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
@@ -342,8 +359,43 @@ class TaskTrainer(BaseTrainer):
                 outputs = self.model(mixed_inputs)
                 loss = lam * self.criterion(outputs, labels) + (1 - lam) * self.criterion(outputs, labels[idx])
             else:
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
+                user_labels = user_labels.to(self.device).long()
+                env_labels = env_labels.to(self.device).long()
+                device_labels = device_labels.to(self.device).long()
+
+                main_logits, user_logits, env_logits, device_logits = self.model(inputs, return_domains=True)
+                outputs = main_logits
+                loss_main = self.criterion(main_logits, labels)
+                loss_user = self.criterion_domain(user_logits, user_labels)
+                loss_env = self.criterion_domain(env_logits, env_labels)
+                loss_device = self.criterion_domain(device_logits, device_labels)
+
+                # Use a lower weight (0.1) for domain losses to keep main task dominant
+                lambda_u, lambda_e, lambda_d = 0.1, 0.1, 0.1
+
+                loss = loss_main + (lambda_u * loss_user) + (lambda_e * loss_env) + (lambda_d * loss_device)
+                
+                # Track domain accuracies
+                with torch.no_grad():
+                    u_preds = torch.argmax(user_logits, dim=1)
+                    e_preds = torch.argmax(env_logits, dim=1)
+                    d_preds = torch.argmax(device_logits, dim=1)
+                    
+                    # Only count samples where labels are not -1
+                    u_mask = user_labels != -1
+                    if u_mask.any():
+                        u_acc = (u_preds[u_mask] == user_labels[u_mask]).float().mean().item()
+                        self.domain_metrics["user_acc"].append(u_acc)
+                    
+                    e_mask = env_labels != -1
+                    if e_mask.any():
+                        e_acc = (e_preds[e_mask] == env_labels[e_mask]).float().mean().item()
+                        self.domain_metrics["env_acc"].append(e_acc)
+                        
+                    d_mask = device_labels != -1
+                    if d_mask.any():
+                        d_acc = (d_preds[d_mask] == device_labels[d_mask]).float().mean().item()
+                        self.domain_metrics["device_acc"].append(d_acc)
 
             # backward pass
             loss.backward()
@@ -367,7 +419,10 @@ class TaskTrainer(BaseTrainer):
             total_time += time.perf_counter() - start_time
 
             # update progress bar
-            loader.set_postfix(loss=loss.item())
+            avg_u = np.mean(self.domain_metrics["user_acc"][-10:]) if self.domain_metrics["user_acc"] else 0
+            avg_e = np.mean(self.domain_metrics["env_acc"][-10:]) if self.domain_metrics["env_acc"] else 0
+            avg_d = np.mean(self.domain_metrics["device_acc"][-10:]) if self.domain_metrics["device_acc"] else 0
+            loader.set_postfix(loss=f"{loss.item():.3f}", main_acc=f"{epoch_accuracy/max(1, total_samples):.3f}", u_acc=f"{avg_u:.2f}", e_acc=f"{avg_e:.2f}", d_acc=f"{avg_d:.2f}", alpha=f"{self.grl_alpha:.2f}")
 
         # calculate averages
         epoch_loss /= total_samples
@@ -420,8 +475,11 @@ class TaskTrainer(BaseTrainer):
 
         with torch.no_grad():
             for batch in data_loader:
-                # Handle variable-sized batches from dataset
-                inputs, labels = batch[0], batch[1]
+                if len(batch) == 5:
+                    inputs, labels, user_labels, env_labels, device_labels = batch
+                elif len(batch) == 2:
+                    inputs, labels = batch
+
                 # skip empy batches
                 if inputs.size(0) == 0:
                     continue
@@ -562,8 +620,7 @@ class TaskTrainer(BaseTrainer):
                     data = batch["data"]
                     labels = batch["labels"]
                 else:
-                    # Handle variable-sized batches from dataset
-                    data, labels = batch[0], batch[1]
+                    data, labels = batch
 
                 # handle different label formats
                 if isinstance(labels, tuple):
@@ -678,7 +735,8 @@ class TaskTrainer(BaseTrainer):
             for batch in data_loader:
                 # get inputs and move to device
                 if isinstance(batch, (list, tuple)):
-                    inputs, labels = batch[0], batch[1]
+                    inputs = batch[0]
+                    labels = batch[1]
                 else:
                     inputs = batch["input"]
                     labels = batch["label"]

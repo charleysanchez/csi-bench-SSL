@@ -32,8 +32,10 @@ from sklearn.metrics import f1_score
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from load.dataloader import get_loaders
-from scripts.train_supervised import MODEL_TYPES
-from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel, SimpleMultiTaskModel
+from load.collate import CollateSkipNone
+from model.registry import MODEL_TYPES
+from model.wrappers import wrap_backbone_for_multitask_transformer, wrap_for_dann
+from model.multitask.models import SimpleMultiTaskModel
 from utils.config import update_args_with_yaml
 from load.data_augmentation import CSIAugmentation
 
@@ -51,6 +53,9 @@ def parse_args():
     # TTA options
     parser.add_argument('--tta', action='store_true', help='Enable Test-Time Augmentation')
     parser.add_argument('--tta_rounds', type=int, default=10, help='Number of TTA augmentation rounds')
+    
+    # DANN options
+    parser.add_argument('--use_dann', action='store_true', help='Enable DANN evaluation (wraps encoder)')
     
     args, unknown = parser.parse_known_args()
     
@@ -74,7 +79,8 @@ def evaluate(model, loader, device, task=None):
         
     with torch.no_grad():
         for batch in loader:
-            inputs, labels = batch
+            # Handle variable-sized batches from dataset
+            inputs, labels = batch[0], batch[1]
             inputs, labels = inputs.to(device), labels.to(device)
             
             outputs = model(inputs)
@@ -112,7 +118,9 @@ def evaluate_with_tta(model, loader, device, augmentor, n_rounds=10, task=None):
         model.set_active_task(task)
     
     with torch.no_grad():
-        for inputs, labels in loader:
+        for batch in loader:
+            # Handle variable-sized batches from dataset
+            inputs, labels = batch[0], batch[1]
             inputs, labels = inputs.to(device), labels.to(device)
             batch_size = inputs.size(0)
             
@@ -164,12 +172,9 @@ def main():
     test_loaders = {}
     task_classes = {}
 
-    # 1. Custom Collate to handle None samples
-    def custom_collate_fn(batch):
-        batch = [item for item in batch if item is not None]
-        if len(batch) == 0:
-            return torch.zeros(0, 1, args.win_len, getattr(args, 'feature_size', 232)), torch.zeros(0, dtype=torch.long)
-        return torch.utils.data.dataloader.default_collate(batch)
+    # 1. Custom collate to handle None samples
+    feature_size = getattr(args, 'feature_size', 232)
+    custom_collate_fn = CollateSkipNone(args.win_len, feature_size, for_supervised=True)
 
     # 2. Load Data
     for task in tasks:
@@ -210,29 +215,17 @@ def main():
     # Wrap for Multitask if necessary
     if args.pipeline == "multitask":
         if args.model == 'transformer':
-            class TransformerEmbedding(nn.Module):
-                def __init__(self, cls_model):
-                    super().__init__()
-                    self.input_proj = cls_model.input_proj
-                    self.pos_encoder = cls_model.pos_encoder
-                    self.transformer = cls_model.transformer
-                def forward(self, x):
-                    x = x.squeeze(1)
-                    x = self.input_proj(x)
-                    x = self.pos_encoder(x)
-                    x = self.transformer(x)
-                    return x.mean(dim=1)
-            
-            backbone = TransformerEmbedding(backbone_model)
-            class ConfigDict(dict):
-                def __getattr__(self, name): return self.get(name)
-            
-            backbone.config = ConfigDict(hidden_size=getattr(args, 'emb_dim', 256), num_hidden_layers=len(backbone_model.transformer.layers))
+            backbone = wrap_backbone_for_multitask_transformer(backbone_model, args)
             model = SimpleMultiTaskModel(backbone, task_classes)
         else:
             raise NotImplementedError("Eval script currently only configured for multitask transformer wrapping.")
     else:
         model = backbone_model
+
+    # Wrap for DANN if necessary
+    if getattr(args, 'use_dann', False):
+        print("Wrapping model in DANNTransformer for evaluation...")
+        model = wrap_for_dann(model, task_classes[tasks[0]], args)
 
     model.to(device)
 

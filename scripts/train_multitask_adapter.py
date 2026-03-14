@@ -13,8 +13,10 @@ import math
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from load.dataloader import get_loaders
+from load.collate import CollateSkipNone
 from load.data_augmentation import CSIAugmentation
-from scripts.train_supervised import MODEL_TYPES
+from model.registry import MODEL_TYPES
+from model.wrappers import wrap_backbone_for_multitask_transformer
 from engine.task_trainer import TaskTrainer
 from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel, MultiTaskAdapterModelPEFT, SimpleMultiTaskModel
 from utils.config import update_args_with_yaml
@@ -149,18 +151,9 @@ def main():
     train_loaders, val_loaders, test_loaders = {}, {}, {}
     task_classes = {}
 
-    # add handling for None values to prevent dataloader errors
-    def custom_collate_fn(batch):
-        # filter out None samples
-        batch = [item for item in batch if item is not None]
-        
-        # if no samples remain after filtering, return empty tensors
-        if len(batch) == 0:
-            return torch.zeros(0, 1, args.win_len, args.feature_size), torch.zeros(0, dtype=torch.long)
-        
-        # use default collate function for the filtered batch
-        return torch.utils.data.dataloader.default_collate(batch)
-    
+    # Collate that skips None samples (use defaults until feature_size inferred from data)
+    custom_collate_fn = CollateSkipNone(args.win_len or 232, args.feature_size or 232, for_supervised=True)
+
     for task in tasks:
         print(f"--- Loading Data for Task: {task} ---")
         data = get_loaders(
@@ -267,43 +260,7 @@ def main():
 
     # --- Transformer Embedding Wrapper ---
     if args.model == 'transformer':
-        class TransformerEmbedding(nn.Module):
-            def __init__(self, cls_model):
-                super().__init__()
-                self.input_proj = cls_model.input_proj
-                self.pos_encoder = cls_model.pos_encoder
-                self.transformer = cls_model.transformer
-
-            def forward(self, x):
-                x = x.squeeze(1)
-                x = self.input_proj(x)
-                x = self.pos_encoder(x)
-                x = self.transformer(x)
-                return x.mean(dim=1)
-        
-        backbone = TransformerEmbedding(backbone_model)
-        
-        # Attach config with both dict and attribute access
-        class ConfigDict(dict):
-            def __getattr__(self, name):
-                try:
-                    return self[name]
-                except KeyError:
-                    raise AttributeError(f"No such attribute: {name}")
-        
-        d_model = args.emb_dim
-        num_layers = len(backbone_model.transformer.layers)
-        backbone.config = ConfigDict(
-            model_type="bert",
-            hidden_size=d_model,
-            num_attention_heads=8,
-            num_hidden_layers=num_layers,
-            intermediate_size=d_model * 4,
-            hidden_dropout_prob=args.dropout,
-            use_return_dict=False
-        )
-
-        # Create SimpleMultiTaskModel (no LoRA/PEFT — uses partial layer freezing)
+        backbone = wrap_backbone_for_multitask_transformer(backbone_model, args)
         model = SimpleMultiTaskModel(backbone, task_classes)
 
     elif args.model == 'patchtst':

@@ -16,66 +16,19 @@ import time
 
 from torch.utils.data import DataLoader, ConcatDataset
 from load.dataloader import get_loaders
+from load.collate import CollateSkipNone
 from load.dataset import CSIDataset
 from load.pretrain_dataset import PretrainDataset
 from load.data_augmentation import CSIAugmentation
 from engine.masked_trainer import MaskedTrainer
 from engine.cpc_trainer import CPCTrainer
 from utils.config import update_args_with_yaml, save_config
-from model.models import (
-    MaskedLSTM,
-    MaskedPatchTST,
-    MaskedTimesFormer1D,
-    MaskedTransformer,
-    CPCModel
-)
-
-# -------------------------------------------------
-# MODEL REGISTRY (must output reconstruction)
-# -------------------------------------------------
-
-MODEL_TYPES = {
-    "lstm": MaskedLSTM,
-    "patchtst": MaskedPatchTST,
-    "timesformer1d": MaskedTimesFormer1D,
-    "transformer": MaskedTransformer,
-    "cpc": CPCModel,
-}
+from model.registry import PRETRAIN_MODEL_TYPES
 
 # -------------------------------------------------
 # MAIN
 # -------------------------------------------------
 
-# this is a class because I get this error when using a function on MPS:
-# '_pickle.PicklingError: Can't pickle local object <function main.<locals>.collate_skip_none>'
-class CollateSkipNone:
-    def __init__(self, win_len, feature_size):
-        self.win_len = win_len
-        self.feature_size = feature_size
-
-    def __call__(self, batch):
-        batch = [b for b in batch if b is not None]
-        if len(batch) == 0:
-            return torch.zeros(0, 1, self.win_len, self.feature_size), torch.zeros(0)
-            
-        collated = torch.utils.data.dataloader.default_collate(batch)
-        
-        # Check if the dataset returned (inputs, labels)
-        if isinstance(collated, (list, tuple)):
-            inputs = collated[0]
-            # If [Batch, Time, Features], add the dummy Channel dimension
-            if len(inputs.shape) == 3: 
-                inputs = inputs.unsqueeze(1) # -> [Batch, 1, Time, Features]
-            
-            # Reconstruct and return the tuple
-            return (inputs,) + tuple(collated[1:])
-            
-        # Check if the dataset returned just inputs
-        else:
-            inputs = collated
-            if len(inputs.shape) == 3:
-                inputs = inputs.unsqueeze(1)
-            return inputs
 
 def main():
 
@@ -90,7 +43,7 @@ def main():
     parser.add_argument("--all_tasks", action="store_true",
                         help="Pretrain on all available tasks combined.")
     parser.add_argument("--model", type=str, default="lstm",
-                        choices=list(MODEL_TYPES.keys()))
+                        choices=list(PRETRAIN_MODEL_TYPES.keys()))
 
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=100)
@@ -226,7 +179,7 @@ def main():
             shuffle=True,
             num_workers=args.num_workers,
             pin_memory=args.pin_memory,
-            collate_fn=CollateSkipNone(args.win_len, args.feature_size),
+            collate_fn=CollateSkipNone(args.win_len, args.feature_size, for_supervised=False),
         )
 
         val_loader = DataLoader(
@@ -235,7 +188,7 @@ def main():
             shuffle=False,
             num_workers=args.num_workers,
             pin_memory=args.pin_memory,
-            collate_fn=CollateSkipNone(args.win_len, args.feature_size),
+            collate_fn=CollateSkipNone(args.win_len, args.feature_size, for_supervised=False),
         ) if combined_val else None
 
     else:
@@ -259,7 +212,7 @@ def main():
     # MODEL
     # -------------------------------------------------
 
-    ModelClass = MODEL_TYPES[args.model]
+    ModelClass = PRETRAIN_MODEL_TYPES[args.model]
     
     model_kwargs = {}
 

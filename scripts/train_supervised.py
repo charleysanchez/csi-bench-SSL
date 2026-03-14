@@ -28,47 +28,14 @@ from utils.config import update_args_with_yaml, save_config
 from sklearn.exceptions import UndefinedMetricWarning
 warnings.filterwarnings("ignore", category=UndefinedMetricWarning)
 
-# Import model classes from models.py
-from model.models import (
-    MLPClassifier, 
-    LSTMClassifier, 
-    ResNet18Classifier, 
-    TransformerClassifier, 
-    ViTClassifier,
-    PatchTST,
-    TimesFormer1D,
-    CPCClassifier
-)
+# Import model registry and wrappers
+from model.registry import MODEL_TYPES
+from model.wrappers import wrap_for_dann
+from load.collate import CollateSkipNone
 
 # Import TaskTrainer
 from engine.task_trainer import TaskTrainer
-
-MODEL_TYPES = {
-    'mlp': MLPClassifier,
-    'lstm': LSTMClassifier,
-    'resnet18': ResNet18Classifier,
-    'transformer': TransformerClassifier,
-    'vit': ViTClassifier,
-    'patchtst': PatchTST,
-    'timesformer1d': TimesFormer1D,
-    'cpc': CPCClassifier
-}
-
-class CollateSkipNoneSupervised:
-    def __init__(self, win_len, feature_size):
-        self.win_len = win_len
-        self.feature_size = feature_size
-
-    def __call__(self, batch):
-        # filter out None samples
-        batch = [item for item in batch if item is not None]
-        
-        # if no samples remain after filtering, return empty tensors
-        if len(batch) == 0:
-            return torch.zeros(0, 1, self.win_len, self.feature_size), torch.zeros(0, dtype=torch.long)
-        
-        # use default collate function for the filtered batch
-        return torch.utils.data.dataloader.default_collate(batch)
+from engine.dann_trainer import DannTrainer
 
 
 def main(args=None):
@@ -165,6 +132,8 @@ def main(args=None):
                     help='Path to YAML config file to override args')
         parser.add_argument('--experiment_id', type=str, default=None,
                     help='Pass experiment id if already done in pretraining')
+        parser.add_argument('--use_dann', action='store_true',
+                    help='Enable Domain-Adversarial Neural Network (DANN) training')
         
         args = parser.parse_args()
 
@@ -263,7 +232,7 @@ def main(args=None):
     print(f"Using test splits: {test_splits}")
 
     # instantiate collate function to handle None values
-    custom_collate_fn = CollateSkipNoneSupervised(args.win_len, args.feature_size)
+    custom_collate_fn = CollateSkipNone(args.win_len, args.feature_size, for_supervised=True)
 
     if args.no_pin_memory:
         args.pin_memory = False
@@ -379,6 +348,10 @@ def main(args=None):
         print(f"  Unexpected keys: {unexpected}")
         print("Pretrained encoder loaded successfully.")
 
+    if getattr(args, 'use_dann', False):
+        print("Wrapping model in DANNTransformer...")
+        model = wrap_for_dann(model, num_classes, args)
+
     model = model.to(device)
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
@@ -398,7 +371,11 @@ def main(args=None):
         for name, param in model.named_parameters():
             if not param.requires_grad:
                 continue
-            if 'classifier.' in name:
+            
+            # Identify classification head parameters (various names across models)
+            is_head = any(key in name for key in ['classifier.', 'head.', 'fc.', 'main_head.', 'user_head.', 'env_head.', 'device_head.'])
+            
+            if is_head:
                 head_params.append(param)
             else:
                 backbone_params.append(param)
@@ -454,7 +431,8 @@ def main(args=None):
     print(f"Successfully saved configuration to {os.path.abspath(config_path)}")
 
     # create TaskTrainer
-    trainer = TaskTrainer(
+    TrainerClass = DannTrainer if getattr(args, 'use_dann', False) else TaskTrainer
+    trainer = TrainerClass(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,

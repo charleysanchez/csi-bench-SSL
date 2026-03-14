@@ -17,7 +17,7 @@ Usage:
     python local_runner.py --config_file [config_path]
     
 Additional parameters:
-    --config_file: JSON configuration file to use for all settings
+    --config_file: YAML configuration file to use for all settings
 """
 
 import os

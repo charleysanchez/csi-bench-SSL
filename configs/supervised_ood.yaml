@@ -40,7 +40,7 @@ model_params:
 
 # OOD Improvement Techniques
 ood_techniques:
-  mixup_alpha: 0.2     # Mixup blending (0=off, 0.2=recommended)
-  swa_epochs: 20       # SWA epochs after training (0=off)
+  mixup_alpha: 0.0    # Mixup blending (0=off, 0.2=recommended)
+  swa_epochs: 0       # SWA epochs after training (0=off)
   swa_lr: 1e-4         # SWA learning rate
   label_smoothing: 0.0  # Label smoothing (0=off)
