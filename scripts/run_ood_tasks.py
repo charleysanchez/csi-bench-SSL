@@ -216,10 +216,11 @@ elif args.pipeline == "supervised":
             
             if ENCODER is not None: cmd.extend(["--pretrained_encoder", ENCODER])
             if CONFIG is not None: cmd.extend(["--config", CONFIG])
-
+            if args.freeze_backbone:
+                cmd.extend(["--freeze_backbone"])
             if args.use_dann:
                 cmd.extend(["--use_dann"])
-            
+
             result = subprocess.run(cmd, text=True)
             
             if result.returncode != 0:

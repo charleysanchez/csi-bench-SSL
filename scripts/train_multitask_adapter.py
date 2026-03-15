@@ -7,8 +7,6 @@ import uuid
 import yaml
 import json
 import torch.nn as nn
-import math
-
 # Ensure we can import from the project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -20,6 +18,7 @@ from model.wrappers import wrap_backbone_for_multitask_transformer
 from engine.task_trainer import TaskTrainer
 from model.multitask.models import MultiTaskAdapterModel, PatchTSTAdapterModel, TimesFormerAdapterModel, MultiTaskAdapterModelPEFT, SimpleMultiTaskModel
 from utils.config import update_args_with_yaml
+from utils.optim import build_optimizer, step_warmup_cosine_scheduler
 import pandas as pd
 from sklearn.metrics import f1_score
 
@@ -443,35 +442,25 @@ def main():
             param.requires_grad = False
         print(f"  Froze positional encoder")
     
-    # Collect trainable params into optimizer groups
-    head_params = []
-    backbone_params = []
-    
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if 'heads.' in name:
-            head_params.append(param)
-        else:
-            backbone_params.append(param)
-    
-    # Weight decay: stronger than before to reduce overfitting
     wd = float(getattr(args, 'weight_decay', 1e-3))
-    optimizer = torch.optim.AdamW([
-        {'params': backbone_params, 'lr': args.lr * 0.1},  # unfrozen backbone layers at lower LR
-        {'params': head_params, 'lr': args.lr}              # heads at full LR
-    ], weight_decay=wd)
-    
-    # Print parameter summary
-    n_trainable = sum(p.numel() for p in head_params) + sum(p.numel() for p in backbone_params)
+    optimizer = build_optimizer(
+        model,
+        lr=args.lr,
+        weight_decay=wd,
+        backbone_lr_scale=0.1,
+        head_keywords=("heads.",),
+    )
+
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_total = sum(p.numel() for p in model.parameters())
     n_frozen = n_total - n_trainable
     print(f"\nParameter Summary (Partial Unfreezing):")
     print(f"  Total params:     {n_total:,}")
     print(f"  Frozen params:    {n_frozen:,} ({n_frozen/n_total*100:.1f}%)")
     print(f"  Trainable params: {n_trainable:,} ({n_trainable/n_total*100:.1f}%)")
-    print(f"  Backbone (unfrozen layers): {sum(p.numel() for p in backbone_params):,}  (lr={args.lr * 0.1})")
-    print(f"  Heads:                      {sum(p.numel() for p in head_params):,}  (lr={args.lr})")
+    for i, g in enumerate(optimizer.param_groups):
+        n = sum(p.numel() for p in g["params"])
+        print(f"  Optimizer group {i}: {n:,} params, lr={g['lr']}")
     print(f"  Weight decay: {wd}")
     # --------------------------------------------------------
     label_smoothing = float(getattr(args, 'label_smoothing', 0.1))
@@ -481,15 +470,7 @@ def main():
     total_loader_len = sum(len(loader) for loader in train_loaders.values())
     num_steps = total_loader_len * args.epochs
     warmup_steps = total_loader_len * args.warmup_epochs
-
-    def warmup_cosine_schedule(step):
-        if step < warmup_steps:
-            return float(step) / float(max(1, warmup_steps))
-        else:
-            progress = float(step - warmup_steps) / float(max(1, num_steps - warmup_steps))
-            return 0.5 * (1.0 + math.cos(math.pi * progress))
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
+    scheduler = step_warmup_cosine_scheduler(optimizer, num_steps, warmup_steps)
 
     # Training loop
     history = []

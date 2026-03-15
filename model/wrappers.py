@@ -53,9 +53,11 @@ def wrap_backbone_for_multitask_transformer(backbone_model, args):
     return backbone
 
 
-def wrap_for_dann(model, num_classes, args, num_users=64, num_envs=26, num_devices=37):
+def wrap_for_dann(model, num_classes, args, num_users=65, num_envs=27, num_devices=37):
     """
     Strip the classification head from `model` and wrap in DANNTransformer.
+    Uses the model's embedding size when available (e.g. CPC has hidden_size=256).
+    Domain head sizes must match load/dataset.py GLOBAL_*_MAPPING + Unknown: 65 users, 27 envs, 37 devices.
     """
     if hasattr(model, "classifier"):
         model.classifier = nn.Identity()
@@ -63,7 +65,8 @@ def wrap_for_dann(model, num_classes, args, num_users=64, num_envs=26, num_devic
         model.head = nn.Identity()
     elif hasattr(model, "fc"):
         model.fc = nn.Identity()
-    embed_dim = getattr(args, "emb_dim", 256)
+    # CPC and others use hidden_size; transformer config uses emb_dim
+    embed_dim = getattr(model, "hidden_size", None) or getattr(model, "d_model", None) or getattr(args, "emb_dim", 256)
     return DANNTransformer(
         base_encoder=model,
         embed_dim=embed_dim,

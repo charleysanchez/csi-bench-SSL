@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-import math
 
 # Add the project root directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,6 +21,7 @@ import matplotlib.pyplot as plt
 import warnings
 import yaml
 from utils.config import update_args_with_yaml, save_config
+from utils.optim import build_optimizer, step_warmup_cosine_scheduler
 
 
 # Mute sklearn warnings about precision/recall being ill-defined
@@ -134,6 +134,10 @@ def main(args=None):
                     help='Pass experiment id if already done in pretraining')
         parser.add_argument('--use_dann', action='store_true',
                     help='Enable Domain-Adversarial Neural Network (DANN) training')
+        parser.add_argument('--freeze_backbone', action='store_true',
+                    help='Freeze pretrained encoder/backbone (transformer layers or CPC g_enc). Only applies when --pretrained_encoder is set.')
+        parser.add_argument('--freeze_layers', type=int, nargs='+', default=None,
+                    help='Transformer layer indices to freeze when using pretrained_encoder + freeze_backbone (default: 0 1 2). Ignored for non-transformer models.')
         
         args = parser.parse_args()
 
@@ -356,52 +360,44 @@ def main(args=None):
 
     print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
 
-    # Set up optimizer — train ALL parameters (matches paper Section B.3)
-    if args.pretrained_encoder is not None:
-        freeze_layers = getattr(args, 'freeze_layers', [0, 1, 2])  # freeze first 3 of 4 layers by default
+    # Optional freeze of pretrained backbone (only when --freeze_backbone is set)
+    if args.pretrained_encoder is not None and getattr(args, 'freeze_backbone', False):
         if hasattr(model, 'transformer') and hasattr(model.transformer, 'layers'):
+            freeze_layers = getattr(args, 'freeze_layers', None) or [0, 1, 2]
             for layer_idx in freeze_layers:
-                if layer_idx < len(model.transformer.layers):
+                if 0 <= layer_idx < len(model.transformer.layers):
                     for param in model.transformer.layers[layer_idx].parameters():
                         param.requires_grad = False
                     print(f"  Froze transformer layer {layer_idx}")
-        head_params = []
-        backbone_params = []
-        
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-            
-            # Identify classification head parameters (various names across models)
-            is_head = any(key in name for key in ['classifier.', 'head.', 'fc.', 'main_head.', 'user_head.', 'env_head.', 'device_head.'])
-            
-            if is_head:
-                head_params.append(param)
-            else:
-                backbone_params.append(param)
+        elif hasattr(model, 'g_enc'):
+            for param in model.g_enc.parameters():
+                param.requires_grad = False
+            print("  Froze CPC encoder (g_enc)")
+        else:
+            print("  (freeze_backbone set but model has no transformer.layers or g_enc; nothing frozen)")
 
-        backbone_lr = args.lr * 0.1
-        print(f"\nDiscriminative LR: backbone={backbone_lr}, head={args.lr}")
-        print(f"  Backbone params: {sum(p.numel() for p in backbone_params)}, Head params: {sum(p.numel() for p in head_params)}")
-        optimizer = torch.optim.AdamW([
-            {'params': backbone_params, 'lr': backbone_lr},      # pretrained backbone at 0.1x LR
-            {'params': head_params, 'lr': args.lr}     # classifier head at full LR
-        ], weight_decay=args.weight_decay)
+    # Set up optimizer (discriminative LR when using pretrained encoder)
+    if args.pretrained_encoder is not None:
+        optimizer = build_optimizer(
+            model, lr=args.lr, weight_decay=args.weight_decay,
+            backbone_lr_scale=0.1,
+        )
     else:
-        optimizer = torch.optim.AdamW(
-        model.parameters(), 
-        lr=args.lr, 
-        weight_decay=args.weight_decay
-    )
-    # Print parameter summary
+        optimizer = build_optimizer(
+            model, lr=args.lr, weight_decay=args.weight_decay,
+        )
+
     num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     num_total = sum(p.numel() for p in model.parameters())
     if args.pretrained_encoder is not None:
         num_frozen = num_total - num_trainable
-        print(f"\nParameter Summary (Pretrained Encoder):")
+        print("\nParameter Summary (Pretrained Encoder):")
         print(f"  Total params:     {num_total:,}")
         print(f"  Frozen params:    {num_frozen:,} ({num_frozen/num_total*100:.1f}%)")
         print(f"  Trainable params: {num_trainable:,} ({num_trainable/num_total*100:.1f}%)")
+        for i, g in enumerate(optimizer.param_groups):
+            n = sum(p.numel() for p in g["params"])
+            print(f"  Optimizer group {i}: {n:,} params, lr={g['lr']}")
     else:
         print(f"\nOptimizer: AdamW (lr={args.lr}, wd={args.weight_decay})")
         print(f"  Trainable: {num_trainable}/{num_total} ({100*num_trainable/num_total:.1f}%)")
@@ -411,19 +407,10 @@ def main(args=None):
     if label_smoothing > 0:
         print(f"Using label smoothing: {label_smoothing}")
 
-    # create step-level warmup cosine LR scheduler (matches original repo)
     num_steps = len(train_loader) * args.epochs
     warmup_steps = len(train_loader) * args.warmup_epochs
-
-    def warmup_cosine_schedule(step):
-        if step < warmup_steps:
-            return float(step) / float(max(1, warmup_steps))
-        else:
-            progress = float(step - warmup_steps) / float(max(1, num_steps - warmup_steps))
-            return 0.5 * (1.0 + math.cos(math.pi * progress))
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_schedule)
-    print(f"Using step-level warmup cosine LR scheduler: {warmup_steps} warmup steps, {num_steps} total steps")
+    scheduler = step_warmup_cosine_scheduler(optimizer, num_steps, warmup_steps)
+    print(f"LR scheduler: step-level warmup cosine ({warmup_steps} warmup, {num_steps} total steps)")
 
     # save configuration
     config_path = os.path.join(results_dir, f"{args.model}_{args.task}_config.yaml")
@@ -679,5 +666,4 @@ def main(args=None):
     return summary, all_results, model
 
 if __name__ == '__main__':
-    import math  # Import math here for the scheduler function
     main()

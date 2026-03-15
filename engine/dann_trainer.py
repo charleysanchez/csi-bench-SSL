@@ -341,8 +341,8 @@ class DannTrainer(BaseTrainer):
             # forward pass
             self.optimizer.zero_grad()
 
-            # Calculate dynamic alpha (scaling from 0 to 1)
-            # Following Ganin & Lempitsky (2015): alpha = 2 / (1 + exp(-10 * p)) - 1
+            # GRL schedule: alpha ramps from 0 (no reversal) to 1 (full reversal) over training.
+            # Ganin & Lempitsky (2015): alpha = 2/(1+exp(-10*p))-1, p in [0,1].
             p = float(self.current_epoch * len(self.train_loader) + total_samples // batch_size) / (
                 getattr(self.config, "epochs", 100) * len(self.train_loader)
             )
@@ -350,7 +350,7 @@ class DannTrainer(BaseTrainer):
             if hasattr(self.model, 'grl'):
                 self.model.grl.alpha = self.grl_alpha
 
-            # Apply Mixup if enabled
+            # When Mixup is enabled we skip domain losses this batch (main task only).
             if self.mixup_alpha > 0 and self.model.training:
                 lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
                 lam = max(lam, 1 - lam)  # ensure lam >= 0.5 so original dominates

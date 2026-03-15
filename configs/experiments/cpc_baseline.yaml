@@ -1,0 +1,28 @@
+# CPC finetune baseline: no freeze, no DANN, no mixup, no SWA.
+# Use with: --model cpc --pretrained_encoder <path> --config configs/experiments/cpc_baseline.yaml
+
+training:
+  epochs: 100
+  patience: 15
+  batch_size: 128
+  num_workers: 8
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 1e-5
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+
+ood_techniques:
+  mixup_alpha: 0.0
+  swa_epochs: 0
+  swa_lr: 1e-4
+  label_smoothing: 0.1

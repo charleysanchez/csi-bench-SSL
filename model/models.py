@@ -1100,9 +1100,9 @@ class DANNTransformer(nn.Module):
                  base_encoder,          # e.g., your existing TransformerEncoder 
                  embed_dim=256,         # The output dimension of the base_encoder
                  num_classes=6,         # Main task (e.g. Activities)
-                 num_users=64,          # Based on your dataset users
-                 num_envs=26,           # Based on your dataset environments
-                 num_devices=36,        # Based on your dataset devices
+                 num_users=65,          # Match load/dataset.py (GLOBAL_USER_MAPPING + Unknown)
+                 num_envs=27,           # Match load/dataset.py (GLOBAL_ENV_MAPPING + Unknown)
+                 num_devices=37,        # Match load/dataset.py GLOBAL_DEVICE_MAPPING
                  grl_alpha=1.0):        # The gradient reversal multiplier
         super().__init__()
 
