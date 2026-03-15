@@ -327,11 +327,8 @@ class CPCTrainer(BaseTrainer):
         
         loss = 0.0
         
-        # Pre-compute user mappings outside the loop
         if users is not None:
-            # Check edge case: The entire batch is from a single user
             if len(set(users)) <= 1:
-                # Fallback: treat each sequence in the batch as an independent identity
                 user_ids = torch.arange(B, device=self.device)
             else:
                 user_to_id = {u: i for i, u in enumerate(set(users))}
@@ -339,42 +336,33 @@ class CPCTrainer(BaseTrainer):
         else:
             user_ids = torch.arange(B, device=self.device)
             
-        # We will use random negative sampling to get cross-time negatives
-        # num_negatives determines how many random negatives to draw from the flattened N pool.
         num_negatives = getattr(self.config, "cpc_num_negatives", 256)
         
         for k in range(1, k_steps + 1):
             if T - k <= 0:
                 continue
                 
-            # z_t_k is the true target vector at time t+k
             z_t_k = z[:, k:, :] # [B, T-k, feat_dim]
             
-            # c_t_pred is the predicted target from time t using W_k
             c_t_pred = preds[k - 1][:, :-k, :] # [B, T-k, feat_dim]
             
             c_flat = c_t_pred.flatten(0, 1) # [N, d]
             z_flat = z_t_k.flatten(0, 1) # [N, d]
             
-            # Normalize embeddings for cosine similarity
             c_norm = F.normalize(c_flat, dim=-1)
             z_norm = F.normalize(z_flat, dim=-1)
             
             N = c_flat.shape[0]
             K_neg = min(num_negatives, N)
             
-            # Randomly sample K_neg indices for the shared negative pool
             neg_idx = torch.randperm(N, device=self.device)[:K_neg]
             z_neg = z_norm[neg_idx] # [K_neg, d]
             
-            # Calculate positive pairs (diagonal equivalent)
             tau = 0.1
             sim_pos = (c_norm * z_norm).sum(dim=-1, keepdim=True) / tau # [N, 1]
             
-            # Calculate negative pairs
             sim_neg = torch.matmul(c_norm, z_neg.T) / tau # [N, K_neg]
             
-            # Mask out negatives that come from the same user context
             user_ids_flat = user_ids.repeat_interleave(T - k) # [N]
             neg_users = user_ids_flat[neg_idx] # [K_neg]
             

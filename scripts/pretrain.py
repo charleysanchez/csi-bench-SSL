@@ -118,7 +118,6 @@ def main():
     parser.add_argument("--depth", type=int, default=4, help="Number of transformer layers")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     
-    # wandb parameters
     parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
     parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")

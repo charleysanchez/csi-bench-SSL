@@ -167,7 +167,6 @@ def main(args=None):
         parser.add_argument('--experiment_id', type=str, default=None,
                     help='Pass experiment id if already done in pretraining')
 
-        # wandb parameters
         parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
         parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
         parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
@@ -716,7 +715,6 @@ def main(args=None):
         traceback.print_exc()
 
     if args.use_wandb:
-        # Log all final test metrics
         wandb_test_metrics = {}
         for split_name, metrics in all_results.items():
             wandb_test_metrics[f"test_{split_name}_accuracy"] = metrics['accuracy']

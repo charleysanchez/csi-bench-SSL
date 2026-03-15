@@ -1019,9 +1019,6 @@ class CPCModel(nn.Module):
         self.hidden_size = hidden_size
         self.cpc_k_steps = cpc_k_steps
 
-        # g_enc: Feature Encoder (x_t -> z_t)
-        # BUG FIX: Replaced non-causal padding Conv1d with CausalConv1d.
-        # Standard padding looks into the future ($x_{t+1}$), creating a trivial shortcut for CPC.
         self.g_enc = nn.Sequential(
             CausalConv1d(feature_size, hidden_size, kernel_size=3),
             nn.BatchNorm1d(hidden_size),
@@ -1032,36 +1029,27 @@ class CPCModel(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        # g_ar: Autoregressive model (z_{<=t} -> c_t). Causal/unidirectional GRU.
         self.g_ar = nn.GRU(
             input_size=hidden_size,
             hidden_size=hidden_size,
             num_layers=1,
             batch_first=True,
-            bidirectional=False # Strictly causal
+            bidirectional=False
         )
 
-        # W_k: Linear projections for predicting future steps k
         self.W_k = nn.ModuleList([
             nn.Linear(hidden_size, hidden_size, bias=False) 
             for _ in range(cpc_k_steps)
         ])
 
     def forward(self, x):
-        # x shape: [B, 1, T, F] or [B, T, F]
         if x.dim() == 4:
-            x = x.squeeze(1) # [B, T, F]
-
-        # Apply g_enc
-        # Conv1d expects [B, F, T], so we transpose
+            x = x.squeeze(1)
         x = x.transpose(1, 2)
-        z = self.g_enc(x) # [B, H, T]
-        z = z.transpose(1, 2) # [B, T, H]
-
-        # Apply g_ar to get context
-        c, _ = self.g_ar(z) # [B, T, hidden_size]
+        z = self.g_enc(x)
+        z = z.transpose(1, 2)
+        c, _ = self.g_ar(z)
         
-        # Predict future embeddings c_t -> z_{t+k}
         preds = []
         for k in range(self.cpc_k_steps):
             preds.append(self.W_k[k](c))

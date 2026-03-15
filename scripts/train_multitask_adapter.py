@@ -121,7 +121,6 @@ def parse_args():
     parser.add_argument('--warmup_epochs', type=int, default=10,
                         help='Number of warmup epochs for the scheduler')
 
-    # wandb parameters
     parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
     parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
     parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
