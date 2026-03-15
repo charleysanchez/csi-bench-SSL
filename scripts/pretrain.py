@@ -13,6 +13,7 @@ import json
 import hashlib
 import yaml
 import time
+import wandb
 
 from torch.utils.data import DataLoader, ConcatDataset
 from load.dataloader import get_loaders
@@ -116,6 +117,11 @@ def main():
     parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads")
     parser.add_argument("--depth", type=int, default=4, help="Number of transformer layers")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
+    
+    # wandb parameters
+    parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
+    parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
+    parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
 
     args = parser.parse_args()
 
@@ -161,6 +167,17 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     print(f"Using device: {device}")
+
+    # -------------------------------------------------
+    # WANDB INIT
+    # -------------------------------------------------
+    if args.use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),
+            name=f"{args.pretrain_method}_{args.model}_{task_label}_{experiment_id}",
+        )
 
     # -------------------------------------------------
     # LOAD DATA
@@ -408,6 +425,9 @@ def main():
     print("\nPretraining complete.")
     print(f"Best epoch:    {summary['best_epoch']}")
     print(f"Best val loss: {summary['best_val_loss']:.6f}")
+
+    if args.use_wandb:
+        wandb.finish()
 
     return summary, model
 

@@ -5,9 +5,11 @@ import torch
 import time
 import uuid
 import yaml
+import yaml
 import json
 import torch.nn as nn
 import math
+import wandb
 
 # Ensure we can import from the project root
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,6 +120,11 @@ def parse_args():
     parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
     parser.add_argument('--warmup_epochs', type=int, default=10,
                         help='Number of warmup epochs for the scheduler')
+
+    # wandb parameters
+    parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
+    parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
+    parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
     
     args, unknown = parser.parse_known_args()
     
@@ -140,6 +147,17 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     experiment_id = generate_experiment_id()
     print(f"Experiment ID: {experiment_id}")
+
+    # -------------------------------------------------
+    # WANDB INIT
+    # -------------------------------------------------
+    if args.use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),
+            name=f"multitask_{args.model}_{experiment_id}",
+        )
 
     # Task Handling
     tasks = args.tasks.split(',')
@@ -651,6 +669,9 @@ def main():
         avg_val = sum(val_losses) / len(val_losses)
         print(f"Epoch {epoch}: avg_val_loss={avg_val:.4f}")
 
+        if args.use_wandb:
+            wandb.log(row)
+
         # Per-task patience tracking
         for task in task_classes:
             if row.get(f"{task}_val_loss", float('inf')) <= best_metrics[task]['val_loss']:
@@ -912,7 +933,33 @@ def main():
         os.path.join(full_model_dir, f'multitask_adapters_{experiment_id}.pt')
     )
     
-    print("\nMultitask training completed successfully.")
+    # Log final test best metrics
+    if args.use_wandb:
+        import traceback
+        try:
+            wandb_test_metrics = {}
+            for task_name in task_classes:
+                best_perf_path = os.path.join(args.save_dir, task_name, args.model, "best_performance.json")
+                if os.path.exists(best_perf_path):
+                    with open(best_perf_path, 'r') as f:
+                        bp = json.load(f)
+                    
+                    if 'best_test_accuracies' in bp:
+                        for split_name, tacc in bp['best_test_accuracies'].items():
+                            wandb_test_metrics[f"{task_name}_test_{split_name}_accuracy"] = tacc
+                    
+                    if 'best_test_f1_scores' in bp:
+                        for split_name, tf1 in bp['best_test_f1_scores'].items():
+                            wandb_test_metrics[f"{task_name}_test_{split_name}_f1_score"] = tf1
+
+            wandb.log(wandb_test_metrics)
+        except Exception as e:
+            print(f"Warning: Failed to log final multitask test metrics to wandb: {e}")
+            traceback.print_exc()
+
+        wandb.finish()
+
+    print("\nMultitask Training and evaluation completed successfully.")
     print(f"Results saved to: {args.save_dir}")
     print(f"Experiment ID: {experiment_id}")
 

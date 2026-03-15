@@ -34,3 +34,4 @@ default = { features = ["gpu"], solve-group = "default" }
 [tool.pixi.dependencies]
 jupyter = ">=1.1.1,<2"
 ipykernel = ">=7.2.0,<8"
+wandb = ">=0.25.1,<0.26"

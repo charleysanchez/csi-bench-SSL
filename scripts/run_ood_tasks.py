@@ -22,6 +22,10 @@ def parse_args():
     parser.add_argument("--pipeline", type=str, default="supervised", choices=["supervised", "multitask"], help="Choose training approach.")
     parser.add_argument('--freeze_backbone', action="store_true", default=False,
                         help='freeze backbone to allow pretraining to work on its own.')
+    # wandb parameters
+    parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
+    parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
+    parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
     return parser.parse_args()
 
 args = parse_args()
@@ -102,6 +106,12 @@ if args.pipeline == "multitask":
         if args.freeze_backbone:
             cmd.extend(["--freeze_backbone"])
             
+        if args.use_wandb:
+            cmd.extend(["--use_wandb"])
+            cmd.extend(["--wandb_project", args.wandb_project])
+            if args.wandb_entity:
+                cmd.extend(["--wandb_entity", args.wandb_entity])
+                
         result = subprocess.run(cmd, text=True)
         
         if result.returncode != 0:
@@ -212,6 +222,12 @@ elif args.pipeline == "supervised":
             
             if ENCODER is not None: cmd.extend(["--pretrained_encoder", ENCODER])
             if CONFIG is not None: cmd.extend(["--config", CONFIG])
+            
+            if args.use_wandb:
+                cmd.extend(["--use_wandb"])
+                cmd.extend(["--wandb_project", args.wandb_project])
+                if args.wandb_entity:
+                    cmd.extend(["--wandb_entity", args.wandb_entity])
             
             result = subprocess.run(cmd, text=True)
             

@@ -21,6 +21,7 @@ import time
 import matplotlib.pyplot as plt
 import warnings
 import yaml
+import wandb
 from utils.config import update_args_with_yaml, save_config
 
 
@@ -165,6 +166,11 @@ def main(args=None):
                     help='Path to YAML config file to override args')
         parser.add_argument('--experiment_id', type=str, default=None,
                     help='Pass experiment id if already done in pretraining')
+
+        # wandb parameters
+        parser.add_argument("--use_wandb", action="store_true", help="Enable tracking with Weights & Biases")
+        parser.add_argument("--wandb_project", type=str, default="cs8803hsi", help="Weights & Biases project name")
+        parser.add_argument("--wandb_entity", type=str, default=None, help="Weights & Biases entity name")
         
         args = parser.parse_args()
 
@@ -230,6 +236,17 @@ def main(args=None):
     print(f"Experiment ID: {experiment_id}")
     print(f"Results will be saved to: {results_dir}")
     print(f"Model checkpoints will be saved to: {checkpoint_dir}")
+
+    # -------------------------------------------------
+    # WANDB INIT
+    # -------------------------------------------------
+    if args.use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            config=vars(args),
+            name=f"supervised_{args.model}_{args.task}_{experiment_id}",
+        )
 
     # set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -697,6 +714,15 @@ def main(args=None):
         print(f"Warning: Failed to update best_performance.json: {e}")
         import traceback
         traceback.print_exc()
+
+    if args.use_wandb:
+        # Log all final test metrics
+        wandb_test_metrics = {}
+        for split_name, metrics in all_results.items():
+            wandb_test_metrics[f"test_{split_name}_accuracy"] = metrics['accuracy']
+            wandb_test_metrics[f"test_{split_name}_f1_score"] = metrics['f1_score']
+        wandb.log(wandb_test_metrics)
+        wandb.finish()
     
     return summary, all_results, model
 

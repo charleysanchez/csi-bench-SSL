@@ -3,9 +3,11 @@ import json
 import torch
 import torch.nn as nn
 import numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 from torch.cuda.amp import autocast, GradScaler
 from load.data_augmentation import CSIAugmentation
+import wandb
 
 
 def compute_padding_mask(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
@@ -183,6 +185,7 @@ class MaskedTrainer:
         self.patience     = getattr(config, 'patience',     20)
         self.norm_pix_loss = getattr(config, 'norm_pix_loss', True)
         self.use_amp      = getattr(config, 'use_amp', torch.cuda.is_available())
+        self.use_wandb    = getattr(config, 'use_wandb', False)
 
         self.scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
         self.history = []
@@ -320,6 +323,14 @@ class MaskedTrainer:
 
             row = {'epoch': epoch, 'train_loss': train_loss, 'val_loss': val_loss}
             self.history.append(row)
+
+            if self.use_wandb:
+                wandb.log({
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "learning_rate": self.optimizer.param_groups[0]["lr"]
+                })
 
             improved = val_loss < self.best_val_loss
             marker   = " ✓" if improved else ""

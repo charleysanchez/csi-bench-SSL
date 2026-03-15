@@ -20,7 +20,10 @@ from utils.labels import normalize_labels
 from utils.logging import log_epoch
 from utils.training import predict_from_outputs
 
+from utils.training import predict_from_outputs
+
 from load.data_augmentation import CSIAugmentation
+import wandb
 
 
 def warmup_cosine_lr(optimizer, warmup_epochs, total_epochs, min_lr_ratio=0.0):
@@ -97,6 +100,8 @@ class TaskTrainer(BaseTrainer):
         self.local_rank = local_rank
         self.augment = CSIAugmentation()
         self.mixup_alpha = getattr(config, 'mixup_alpha', 0.0) if config else 0.0
+        self.use_wandb = getattr(config, 'use_wandb', False) if config else False
+
         if self.mixup_alpha > 0:
             print(f"Mixup enabled with alpha={self.mixup_alpha}")
 
@@ -225,6 +230,17 @@ class TaskTrainer(BaseTrainer):
                 log_epoch(
                     epoch + 1, train_loss, train_acc, val_loss, val_acc, lr
                 )
+
+                if self.use_wandb:
+                    wandb.log({
+                        "epoch": epoch + 1,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "train_accuracy": train_acc,
+                        "val_accuracy": val_acc,
+                        "learning_rate": lr,
+                        "time_per_sample": train_time,
+                    })
 
             # early stopping check
             if val_loss < best_val_loss:

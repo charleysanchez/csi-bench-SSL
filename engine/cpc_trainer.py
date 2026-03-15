@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
+import wandb
 
 from engine.base_trainer import BaseTrainer
 
@@ -62,6 +63,7 @@ class CPCTrainer(BaseTrainer):
         self.distributed = distributed
         self.local_rank = local_rank
         self.k_steps = getattr(config, "cpc_k_steps", k_steps)
+        self.use_wandb = getattr(config, "use_wandb", False)
 
         if not distributed or local_rank == 0:
             os.makedirs(save_path, exist_ok=True)
@@ -133,6 +135,15 @@ class CPCTrainer(BaseTrainer):
                         "Time per sample": train_time,
                     }
                 )
+
+                if self.use_wandb:
+                    wandb.log({
+                        "epoch": epoch + 1,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "learning_rate": self.optimizer.param_groups[0]["lr"],
+                        "time_per_sample": train_time,
+                    })
 
             # ----- Early Stopping -----
             if val_loss < best_val_loss:
