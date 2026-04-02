@@ -934,10 +934,11 @@ class MaskedTimesFormer1D(nn.Module):
 
 class CausalConv1d(nn.Module):
     """Causal convolutions for preventing time-leakage in autoregressive encoders."""
-    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+    def __init__(self, in_channels, out_channels, kernel_size, spectral_norm=False, **kwargs):
         super().__init__()
         self.pad = kernel_size - 1
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
+        conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
+        self.conv = nn.utils.spectral_norm(conv) if spectral_norm else conv
 
     def forward(self, x):
         # Pad only on the left side (past) to maintain causality
@@ -955,11 +956,11 @@ class CPCClassifier(nn.Module):
         self.win_len = win_len
         
         self.g_enc = nn.Sequential(
-            nn.utils.spectral_norm(CausalConv1d(feature_size, hidden_size, kernel_size=3)),
+            CausalConv1d(feature_size, hidden_size, kernel_size=3, spectral_norm=True),
             nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
-            nn.utils.spectral_norm(CausalConv1d(hidden_size, hidden_size, kernel_size=3)),
+            CausalConv1d(hidden_size, hidden_size, kernel_size=3, spectral_norm=True),
             nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
         )
@@ -1024,11 +1025,11 @@ class CPCModel(nn.Module):
         # BUG FIX: Replaced non-causal padding Conv1d with CausalConv1d.
         # Standard padding looks into the future ($x_{t+1}$), creating a trivial shortcut for CPC.
         self.g_enc = nn.Sequential(
-            nn.utils.spectral_norm(CausalConv1d(feature_size, hidden_size, kernel_size=3)),
+            CausalConv1d(feature_size, hidden_size, kernel_size=3, spectral_norm=True),
             nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
-            nn.utils.spectral_norm(CausalConv1d(hidden_size, hidden_size, kernel_size=3)),
+            CausalConv1d(hidden_size, hidden_size, kernel_size=3, spectral_norm=True),
             nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
         )
