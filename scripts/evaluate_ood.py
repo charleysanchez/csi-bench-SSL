@@ -49,11 +49,20 @@ def parse_args():
     parser.add_argument('--data_dir', type=str, default='data', help='Dataset root directory')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for evaluation')
     parser.add_argument('--num_workers', type=int, default=8, help='Number of dataloader workers')
-    
+
     # TTA options
     parser.add_argument('--tta', action='store_true', help='Enable Test-Time Augmentation')
     parser.add_argument('--tta_rounds', type=int, default=10, help='Number of TTA augmentation rounds')
-    
+
+    # TENT options (Test-Time Entropy minimization)
+    parser.add_argument('--tent', action='store_true',
+                        help='Enable TENT: adapt BatchNorm params at test time via entropy minimization '
+                             '(Wang et al., "Fully Test-Time Adaptation by Entropy Minimization", ICLR 2021)')
+    parser.add_argument('--tent_steps', type=int, default=1,
+                        help='Number of TENT adaptation steps per batch (default 1)')
+    parser.add_argument('--tent_lr', type=float, default=1e-3,
+                        help='Learning rate for TENT adaptation')
+
     # DANN options
     parser.add_argument('--use_dann', action='store_true', help='Enable DANN evaluation (wraps encoder)')
     
@@ -158,6 +167,92 @@ def evaluate_with_tta(model, loader, device, augmentor, n_rounds=10, task=None):
     return accuracy, f1
 
 
+def setup_tent(model, lr=1e-3):
+    """
+    TENT: Fully Test-Time Adaptation by Entropy Minimization.
+    Wang et al., ICLR 2021.
+
+    Configures a model for test-time adaptation by:
+    1. Setting all BatchNorm layers to train mode (so they update running stats).
+    2. Only optimizing the BatchNorm affine parameters (gamma, beta).
+    3. Freezing everything else.
+
+    Returns (model, optimizer) ready for TENT adaptation.
+    """
+    model.eval()  # start from eval
+
+    # Collect BatchNorm affine parameters only
+    tent_params = []
+    for m in model.modules():
+        if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d, nn.LayerNorm)):
+            m.requires_grad_(True)
+            # Set BN layers to train mode so they update running stats
+            if isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
+                m.train()
+            for p in m.parameters():
+                tent_params.append(p)
+        else:
+            # Freeze all other parameters
+            for p in m.parameters(recurse=False):
+                p.requires_grad = False
+
+    optimizer = torch.optim.Adam(tent_params, lr=lr) if tent_params else None
+    return model, optimizer
+
+
+def evaluate_with_tent(model, loader, device, tent_optimizer, tent_steps=1, task=None):
+    """
+    Run TENT adaptation: for each batch, minimize prediction entropy
+    w.r.t. BatchNorm affine parameters, then predict.
+
+    This adapts the model online — each batch updates the model, and
+    subsequent batches benefit from accumulated adaptation.
+    """
+    all_preds = []
+    all_labels = []
+
+    if hasattr(model, 'set_active_task') and task is not None:
+        model.set_active_task(task)
+
+    for batch in loader:
+        inputs, labels = batch[0], batch[1]
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # TENT: adapt on this batch by minimizing entropy
+        if tent_optimizer is not None:
+            for _ in range(tent_steps):
+                outputs = model(inputs)
+                # Entropy of softmax predictions
+                probs = torch.softmax(outputs, dim=1)
+                entropy = -(probs * probs.clamp(min=1e-8).log()).sum(dim=1).mean()
+                tent_optimizer.zero_grad()
+                entropy.backward()
+                tent_optimizer.step()
+
+        # Predict (no grad)
+        with torch.no_grad():
+            outputs = model(inputs)
+            _, predicted = torch.max(outputs.data, 1)
+
+        all_preds.extend(predicted.cpu().numpy())
+        all_labels.extend(labels.cpu().numpy())
+
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+
+    accuracy = (all_preds == all_labels).mean()
+
+    if len(set(all_labels)) > 1:
+        try:
+            f1 = f1_score(all_labels, all_preds, average='weighted')
+        except Exception:
+            f1 = 0.0
+    else:
+        f1 = 0.0
+
+    return accuracy, f1
+
+
 def main():
     args = parse_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -200,7 +295,8 @@ def main():
     # Grab feature size from data if missing
     feature_size = getattr(args, 'feature_size', None)
     if feature_size is None:
-        sample_x, _ = next(iter(test_loaders[tasks[0]][list(test_loaders[tasks[0]].keys())[0]]))
+        sample_batch = next(iter(test_loaders[tasks[0]][list(test_loaders[tasks[0]].keys())[0]]))
+        sample_x = sample_batch[0]
         feature_size = sample_x.shape[-1]
 
     # Initialize Base kwargs
@@ -267,30 +363,56 @@ def main():
     for task in tasks:
         print(f"{'-'*50}\n Results for: {task}\n{'-'*50}")
         tdict = test_loaders[task]
-        
-        if args.tta:
+
+        if args.tent:
+            # TENT evaluation: compare standard vs TENT-adapted
+            import copy
+            print(f"{'Split':<20} {'Standard':<25} {'TENT (steps=' + str(args.tent_steps) + ')':<25}")
+            print('-' * 70)
+
+            for split, tloader in tdict.items():
+                task_arg = task if args.pipeline == 'multitask' else None
+
+                # Standard evaluation
+                acc_std, f1_std = evaluate(model, tloader, device, task=task_arg)
+
+                # TENT: adapt a fresh copy per split (so splits don't leak into each other)
+                tent_model = copy.deepcopy(model)
+                tent_model, tent_opt = setup_tent(tent_model, lr=args.tent_lr)
+                acc_tent, f1_tent = evaluate_with_tent(
+                    tent_model, tloader, device, tent_opt,
+                    tent_steps=args.tent_steps, task=task_arg
+                )
+                del tent_model  # free memory
+
+                delta = acc_tent - acc_std
+                delta_sign = "+" if delta >= 0 else ""
+                print(f"{split:<20} {acc_std*100:>6.2f}% / {f1_std*100:>5.2f}%    "
+                      f"{acc_tent*100:>6.2f}% / {f1_tent*100:>5.2f}%  ({delta_sign}{delta*100:.1f}%)")
+
+        elif args.tta:
             print(f"{'Split':<20} {'Standard':<25} {'TTA (' + str(args.tta_rounds) + ' rounds)':<25}")
             print('-' * 70)
-        else:
-            print(f"{'Split':<20} {'Accuracy':<15} {'F1 Score':<15}")
-            print('-' * 50)
-        
-        for split, tloader in tdict.items():
-            task_arg = task if args.pipeline == 'multitask' else None
-            
-            if args.tta:
-                # Run both standard and TTA evaluation for comparison
+
+            for split, tloader in tdict.items():
+                task_arg = task if args.pipeline == 'multitask' else None
+
                 acc_std, f1_std = evaluate(model, tloader, device, task=task_arg)
-                acc_tta, f1_tta = evaluate_with_tta(model, tloader, device, tta_augmentor, 
+                acc_tta, f1_tta = evaluate_with_tta(model, tloader, device, tta_augmentor,
                                                      n_rounds=args.tta_rounds, task=task_arg)
                 delta = acc_tta - acc_std
                 delta_sign = "+" if delta >= 0 else ""
                 print(f"{split:<20} {acc_std*100:>6.2f}% / {f1_std*100:>5.2f}%    "
                       f"{acc_tta*100:>6.2f}% / {f1_tta*100:>5.2f}%  ({delta_sign}{delta*100:.1f}%)")
-            else:
+        else:
+            print(f"{'Split':<20} {'Accuracy':<15} {'F1 Score':<15}")
+            print('-' * 50)
+
+            for split, tloader in tdict.items():
+                task_arg = task if args.pipeline == 'multitask' else None
                 acc, f1 = evaluate(model, tloader, device, task=task_arg)
                 print(f"{split:<20} {acc*100:>6.2f}%         {f1*100:>6.2f}%")
-            
+
     print("\nEvaluation Complete!")
 
 if __name__ == "__main__":

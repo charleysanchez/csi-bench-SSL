@@ -138,7 +138,24 @@ def main(args=None):
                     help='Freeze pretrained encoder/backbone (transformer layers or CPC g_enc). Only applies when --pretrained_encoder is set.')
         parser.add_argument('--freeze_layers', type=int, nargs='+', default=None,
                     help='Transformer layer indices to freeze when using pretrained_encoder + freeze_backbone (default: 0 1 2). Ignored for non-transformer models.')
-        
+        # OOD improvement techniques
+        parser.add_argument('--use_sam', action='store_true',
+                    help='Use Sharpness-Aware Minimization (SAM) optimizer for flatter minima (Foret et al., ICLR 2021)')
+        parser.add_argument('--sam_rho', type=float, default=0.05,
+                    help='Neighbourhood size for SAM perturbation (default 0.05)')
+        parser.add_argument('--manifold_mixup', action='store_true',
+                    help='Apply Mixup in hidden space instead of input space (Verma et al., ICML 2019)')
+        parser.add_argument('--cross_domain_mixup', action='store_true',
+                    help='Pair Mixup samples from different domains (Xu et al., AAAI 2020). Only with --use_dann.')
+        parser.add_argument('--coral_weight', type=float, default=0.0,
+                    help='Weight for CORAL domain alignment loss (Sun & Saenko, ECCV 2016). 0=disabled.')
+        parser.add_argument('--lambda_user', type=float, default=0.1,
+                    help='DANN loss weight for user domain head')
+        parser.add_argument('--lambda_env', type=float, default=0.1,
+                    help='DANN loss weight for environment domain head')
+        parser.add_argument('--lambda_device', type=float, default=0.1,
+                    help='DANN loss weight for device domain head')
+
         args = parser.parse_args()
 
     cli_task = args.task
@@ -167,9 +184,11 @@ def main(args=None):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    # generate a unique experiment ID based only on parameters hash
-    # this way, same parameters will generate same experiment ID
+    # generate a unique experiment ID based on parameters hash
+    # Include seed, dann, and freeze status to ensure different runs don't overwrite
     param_str = f"{args.lr}_{args.batch_size}_{args.epochs}_{args.weight_decay}_{args.warmup_epochs}_{args.win_len}_{args.feature_size}"
+    param_str += f"_{args.seed}_{getattr(args, 'use_dann', False)}_{getattr(args, 'freeze_backbone', False)}"
+    
     if hasattr(args, 'dropout') and args.dropout is not None:
         param_str += f"_{args.dropout}"
     if hasattr(args, 'emb_dim') and args.emb_dim is not None:
@@ -177,7 +196,11 @@ def main(args=None):
     if hasattr(args, 'in_channels') and args.in_channels is not None:
         param_str += f"_{args.in_channels}"
     
-    experiment_id = f"params_{hashlib.md5(param_str.encode()).hexdigest()[:10]}"
+    # Priority: use explicitly passed experiment_id if available, otherwise hash params
+    if getattr(args, 'experiment_id', None):
+        experiment_id = args.experiment_id
+    else:
+        experiment_id = f"params_{hashlib.md5(param_str.encode()).hexdigest()[:10]}"
 
     # use specified directories for local environment with task/model/experiment structure
     # directory structure: save_dir/task/model/experiment_id
@@ -378,14 +401,23 @@ def main(args=None):
 
     # Set up optimizer (discriminative LR when using pretrained encoder)
     if args.pretrained_encoder is not None:
-        optimizer = build_optimizer(
+        base_optimizer = build_optimizer(
             model, lr=args.lr, weight_decay=args.weight_decay,
             backbone_lr_scale=0.1,
         )
     else:
-        optimizer = build_optimizer(
+        base_optimizer = build_optimizer(
             model, lr=args.lr, weight_decay=args.weight_decay,
         )
+
+    # Wrap with SAM if requested
+    if getattr(args, 'use_sam', False):
+        from utils.sam import SAM
+        sam_rho = getattr(args, 'sam_rho', 0.05)
+        optimizer = SAM(model.parameters(), base_optimizer, rho=sam_rho)
+        print(f"SAM optimizer enabled (rho={sam_rho})")
+    else:
+        optimizer = base_optimizer
 
     num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     num_total = sum(p.numel() for p in model.parameters())
@@ -461,7 +493,9 @@ def main(args=None):
             epoch_correct = 0
             total = 0
             
-            for inputs, labels in train_loader:
+            for batch in train_loader:
+                # Handle variable-sized batches from dataset
+                inputs, labels = batch[0], batch[1]
                 if inputs.size(0) == 0:
                     continue
                 inputs = inputs.to(device)

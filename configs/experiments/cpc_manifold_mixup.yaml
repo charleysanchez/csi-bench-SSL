@@ -1,0 +1,29 @@
+# CPC finetune + Manifold Mixup: interpolate in hidden space for smoother decision boundaries.
+# Verma et al., "Manifold Mixup: Better Representations by Interpolating Hidden States" (ICML 2019)
+
+training:
+  epochs: 100
+  patience: 15
+  batch_size: 128
+  num_workers: 8
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 1e-5
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+
+ood_techniques:
+  mixup_alpha: 0.2
+  manifold_mixup: true
+  swa_epochs: 0
+  swa_lr: 1e-4
+  label_smoothing: 0.1

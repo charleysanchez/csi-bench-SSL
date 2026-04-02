@@ -1,0 +1,39 @@
+# CPC finetune "kitchen sink": DANN + SAM + Manifold Mixup + CORAL + SWA.
+# Combines multiple OOD techniques for maximum domain invariance.
+# Use with: --use_dann --model cpc --pretrained_encoder <path>
+
+training:
+  epochs: 100
+  patience: 20
+  batch_size: 128
+  num_workers: 8
+
+optimizer:
+  name: adamw
+  lr: 0.001
+  weight_decay: 1e-5
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 5
+  min_lr_ratio: 0.0
+
+model_params:
+  win_len: 500
+  feature_size: 232
+
+ood_techniques:
+  mixup_alpha: 0.2
+  manifold_mixup: true
+  cross_domain_mixup: true
+  swa_epochs: 20
+  swa_lr: 1e-4
+  label_smoothing: 0.1
+  use_sam: true
+  sam_rho: 0.05
+  coral_weight: 0.5
+
+dann_weights:
+  lambda_user: 0.1
+  lambda_env: 0.1
+  lambda_device: 0.1

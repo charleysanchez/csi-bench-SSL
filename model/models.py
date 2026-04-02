@@ -955,12 +955,12 @@ class CPCClassifier(nn.Module):
         self.win_len = win_len
         
         self.g_enc = nn.Sequential(
-            CausalConv1d(feature_size, hidden_size, kernel_size=3),
-            nn.BatchNorm1d(hidden_size),
+            nn.utils.spectral_norm(CausalConv1d(feature_size, hidden_size, kernel_size=3)),
+            nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
-            CausalConv1d(hidden_size, hidden_size, kernel_size=3),
-            nn.BatchNorm1d(hidden_size),
+            nn.utils.spectral_norm(CausalConv1d(hidden_size, hidden_size, kernel_size=3)),
+            nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
         )
 
@@ -971,7 +971,7 @@ class CPCClassifier(nn.Module):
             batch_first=True,
             bidirectional=False # Strictly causal
         )
-        
+
         self.fc = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
@@ -987,19 +987,25 @@ class CPCClassifier(nn.Module):
             'win_len': self.win_len
         }
         
-    def forward(self, x):
+    def forward(self, x, manifold_mixup=None):
         if x.dim() == 4:
             x = x.squeeze(1)
-            
+
         x = x.transpose(1, 2)
         z = self.g_enc(x)
         z = z.transpose(1, 2)
-        
+
         c, _ = self.g_ar(z)
-        
+
         # Take the last hidden state of the GRU for classification
         hidden = c[:, -1, :]
-        
+
+        # Manifold Mixup: interpolate in hidden space
+        if manifold_mixup is not None:
+            lam = manifold_mixup['lam']
+            idx = manifold_mixup['idx']
+            hidden = lam * hidden + (1 - lam) * hidden[idx]
+
         return self.fc(hidden)
 
 
@@ -1018,12 +1024,12 @@ class CPCModel(nn.Module):
         # BUG FIX: Replaced non-causal padding Conv1d with CausalConv1d.
         # Standard padding looks into the future ($x_{t+1}$), creating a trivial shortcut for CPC.
         self.g_enc = nn.Sequential(
-            CausalConv1d(feature_size, hidden_size, kernel_size=3),
-            nn.BatchNorm1d(hidden_size),
+            nn.utils.spectral_norm(CausalConv1d(feature_size, hidden_size, kernel_size=3)),
+            nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
             nn.Dropout(0.1),
-            CausalConv1d(hidden_size, hidden_size, kernel_size=3),
-            nn.BatchNorm1d(hidden_size),
+            nn.utils.spectral_norm(CausalConv1d(hidden_size, hidden_size, kernel_size=3)),
+            nn.GroupNorm(8, hidden_size),
             nn.ReLU(inplace=True),
         )
 
@@ -1141,16 +1147,31 @@ class DANNTransformer(nn.Module):
             nn.Linear(embed_dim // 2, num_devices)
         )
 
-    def forward(self, x, return_domains=False):
+    def forward(self, x, return_domains=False, manifold_mixup=None):
+        """
+        Args:
+            x: Input tensor.
+            return_domains: If True, also return domain logits.
+            manifold_mixup: If not None, a dict with keys 'lam' (float) and 'idx' (LongTensor).
+                           Applies mixup in the feature space (after encoder, before heads).
+                           Verma et al., "Manifold Mixup: Better Representations by Interpolating
+                           Hidden States" (ICML 2019).
+        """
         # regular forward pass from base encoder to get features
         features = self.encoder(x)
+
+        # Manifold Mixup: interpolate in feature space
+        if manifold_mixup is not None:
+            lam = manifold_mixup['lam']
+            idx = manifold_mixup['idx']
+            features = lam * features + (1 - lam) * features[idx]
 
         # main task prediction (standard forward pass)
         main_logits = self.main_head(features)
 
         if not return_domains:
             return main_logits
-        
+
         # apply gradient reversal
         reversed_features = self.grl(features)
 

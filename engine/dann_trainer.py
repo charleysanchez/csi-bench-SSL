@@ -20,6 +20,7 @@ from utils.logging import log_epoch
 from utils.training import predict_from_outputs, warmup_cosine_lr
 
 from load.data_augmentation import CSIAugmentation
+from utils.sam import SAM
 
 
 class DannTrainer(BaseTrainer):
@@ -83,6 +84,16 @@ class DannTrainer(BaseTrainer):
         self.mixup_alpha = getattr(config, 'mixup_alpha', 0.0) if config else 0.0
         if self.mixup_alpha > 0:
             print(f"Mixup enabled with alpha={self.mixup_alpha}")
+        self.use_sam = getattr(config, 'use_sam', False) if config else False
+        self.manifold_mixup = getattr(config, 'manifold_mixup', False) if config else False
+        # Configurable per-domain loss weights (default 0.1 each)
+        self.lambda_user = getattr(config, 'lambda_user', 0.1) if config else 0.1
+        self.lambda_env = getattr(config, 'lambda_env', 0.1) if config else 0.1
+        self.lambda_device = getattr(config, 'lambda_device', 0.1) if config else 0.1
+        # CORAL loss weight (0 = disabled)
+        self.coral_weight = getattr(config, 'coral_weight', 0.0) if config else 0.0
+        if self.coral_weight > 0:
+            print(f"CORAL loss enabled with weight={self.coral_weight}")
 
         # create directory if it doesn't exist
         if not distributed or (distributed and local_rank == 0):
@@ -354,9 +365,23 @@ class DannTrainer(BaseTrainer):
             if self.mixup_alpha > 0 and self.model.training:
                 lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
                 lam = max(lam, 1 - lam)  # ensure lam >= 0.5 so original dominates
-                idx = torch.randperm(batch_size, device=self.device)
-                mixed_inputs = lam * inputs + (1 - lam) * inputs[idx]
-                outputs = self.model(mixed_inputs)
+
+                cross_domain_mixup = getattr(self.config, 'cross_domain_mixup', False) if self.config else False
+                if cross_domain_mixup:
+                    # Cross-domain Mixup: pair each sample with one from a *different* domain.
+                    # Xu et al., "Adversarial Domain Adaptation with Domain Mixup" (AAAI 2020).
+                    idx = self._cross_domain_indices(
+                        batch_size, user_labels.to(self.device).long(),
+                        env_labels.to(self.device).long(), device_labels.to(self.device).long()
+                    )
+                else:
+                    idx = torch.randperm(batch_size, device=self.device)
+
+                if self.manifold_mixup:
+                    outputs = self.model(inputs, manifold_mixup={'lam': lam, 'idx': idx})
+                else:
+                    mixed_inputs = lam * inputs + (1 - lam) * inputs[idx]
+                    outputs = self.model(mixed_inputs)
                 loss = lam * self.criterion(outputs, labels) + (1 - lam) * self.criterion(outputs, labels[idx])
             else:
                 user_labels = user_labels.to(self.device).long()
@@ -370,10 +395,12 @@ class DannTrainer(BaseTrainer):
                 loss_env = self.criterion_domain(env_logits, env_labels)
                 loss_device = self.criterion_domain(device_logits, device_labels)
 
-                # Use a lower weight (0.1) for domain losses to keep main task dominant
-                lambda_u, lambda_e, lambda_d = 0.1, 0.1, 0.1
+                loss = loss_main + (self.lambda_user * loss_user) + (self.lambda_env * loss_env) + (self.lambda_device * loss_device)
 
-                loss = loss_main + (lambda_u * loss_user) + (lambda_e * loss_env) + (lambda_d * loss_device)
+                # CORAL loss: align feature distributions across domains
+                if self.coral_weight > 0:
+                    coral_loss = self._compute_coral_loss(main_logits, user_labels, env_labels, device_labels)
+                    loss = loss + self.coral_weight * coral_loss
                 
                 # Track domain accuracies
                 with torch.no_grad():
@@ -403,10 +430,31 @@ class DannTrainer(BaseTrainer):
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), max_norm=1.0
             )
-            self.optimizer.step()
+
+            if self.use_sam and isinstance(self.optimizer, SAM):
+                self.optimizer.first_step(zero_grad=True)
+                # Second forward-backward at perturbed parameters
+                if self.mixup_alpha > 0 and self.model.training:
+                    if self.manifold_mixup:
+                        outputs2 = self.model(inputs, manifold_mixup={'lam': lam, 'idx': idx})
+                    else:
+                        outputs2 = self.model(mixed_inputs)
+                    loss2 = lam * self.criterion(outputs2, labels) + (1 - lam) * self.criterion(outputs2, labels[idx])
+                else:
+                    main2, user2, env2, dev2 = self.model(inputs, return_domains=True)
+                    loss2 = self.criterion(main2, labels)
+                    loss2 = loss2 + self.lambda_user * self.criterion_domain(user2, user_labels)
+                    loss2 = loss2 + self.lambda_env * self.criterion_domain(env2, env_labels)
+                    loss2 = loss2 + self.lambda_device * self.criterion_domain(dev2, device_labels)
+                loss2.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.second_step(zero_grad=True)
+            else:
+                self.optimizer.step()
 
             # step scheduler per batch (step-level cosine warmup)
-            self.scheduler.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             # accumulate loss and accuracy
             epoch_loss += loss.item() * batch_size
@@ -458,6 +506,95 @@ class DannTrainer(BaseTrainer):
 
         return epoch_loss, epoch_accuracy, time_per_sample
 
+    def _cross_domain_indices(self, batch_size, user_labels, env_labels, device_labels):
+        """
+        For each sample, find a partner from a *different* domain to mix with.
+
+        Picks the domain axis with the most unique values, then for each sample
+        tries to pair it with a sample from a different domain. Falls back to
+        random permutation if no cross-domain partner is available.
+        """
+        # Pick domain axis with most diversity
+        best_labels = None
+        for labels in [user_labels, env_labels, device_labels]:
+            valid = labels[labels != -1]
+            if valid.numel() == 0:
+                continue
+            if best_labels is None or valid.unique().numel() > best_labels[best_labels != -1].unique().numel():
+                best_labels = labels
+
+        if best_labels is None or best_labels[best_labels != -1].unique().numel() < 2:
+            return torch.randperm(batch_size, device=user_labels.device)
+
+        idx = torch.arange(batch_size, device=user_labels.device)
+        for i in range(batch_size):
+            # Find indices where domain differs
+            candidates = (best_labels != best_labels[i]) & (best_labels != -1)
+            if candidates.any():
+                pool = candidates.nonzero(as_tuple=False).squeeze(-1)
+                idx[i] = pool[torch.randint(len(pool), (1,))]
+            else:
+                # Fallback: random other sample
+                others = torch.arange(batch_size, device=user_labels.device)
+                others = others[others != i]
+                idx[i] = others[torch.randint(len(others), (1,))]
+        return idx
+
+    def _compute_coral_loss(self, features, user_labels, env_labels, device_labels):
+        """
+        CORrelation ALignment (CORAL) loss.
+
+        Sun & Saenko, "Deep CORAL: Correlation Alignment for Deep Domain Adaptation" (ECCV 2016).
+
+        Minimises the distance between second-order statistics (covariance matrices)
+        of feature distributions from different domains. This encourages the encoder
+        to produce domain-invariant representations without needing a discriminator.
+
+        We compute pairwise CORAL across all unique domain values for the most
+        populated domain axis in the batch (user > env > device).
+        """
+        # Pick the domain axis with the most unique labels (best signal)
+        domain_labels = None
+        for labels in [user_labels, env_labels, device_labels]:
+            valid = labels[labels != -1]
+            if valid.numel() == 0:
+                continue
+            if domain_labels is None or valid.unique().numel() > domain_labels.unique().numel():
+                domain_labels = valid
+                domain_full = labels
+
+        if domain_labels is None or domain_labels.unique().numel() < 2:
+            return torch.tensor(0.0, device=features.device)
+
+        unique_domains = domain_labels.unique()
+        coral = torch.tensor(0.0, device=features.device)
+        n_pairs = 0
+
+        # Pre-compute per-domain covariance matrices
+        cov_cache = {}
+        for d in unique_domains:
+            mask = (domain_full == d)
+            feats_d = features[mask]
+            if feats_d.size(0) < 2:
+                continue
+            # Center features
+            feats_d = feats_d - feats_d.mean(dim=0, keepdim=True)
+            cov_d = (feats_d.T @ feats_d) / (feats_d.size(0) - 1)
+            cov_cache[d.item()] = cov_d
+
+        domain_keys = list(cov_cache.keys())
+        for i in range(len(domain_keys)):
+            for j in range(i + 1, len(domain_keys)):
+                diff = cov_cache[domain_keys[i]] - cov_cache[domain_keys[j]]
+                coral = coral + (diff * diff).sum()
+                n_pairs += 1
+
+        if n_pairs > 0:
+            d = features.size(1)
+            coral = coral / (4.0 * d * d * n_pairs)
+
+        return coral
+
     def evaluate(self, data_loader):
         """
         Evaluate the model.
@@ -475,10 +612,8 @@ class DannTrainer(BaseTrainer):
 
         with torch.no_grad():
             for batch in data_loader:
-                if len(batch) == 5:
-                    inputs, labels, user_labels, env_labels, device_labels = batch
-                elif len(batch) == 2:
-                    inputs, labels = batch
+                # Robust unpacking for domain-aware batches (data, labels, user_labels, ...)
+                inputs, labels = batch[0], batch[1]
 
                 # skip empy batches
                 if inputs.size(0) == 0:
@@ -620,7 +755,8 @@ class DannTrainer(BaseTrainer):
                     data = batch["data"]
                     labels = batch["labels"]
                 else:
-                    data, labels = batch
+                    # Robust unpacking for domain-aware batches (data, labels, ...)
+                    data, labels = batch[0], batch[1]
 
                 # handle different label formats
                 if isinstance(labels, tuple):

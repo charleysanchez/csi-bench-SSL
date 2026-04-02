@@ -20,6 +20,7 @@ from utils.logging import log_epoch
 from utils.training import predict_from_outputs, warmup_cosine_lr
 
 from load.data_augmentation import CSIAugmentation
+from utils.sam import SAM
 
 
 class TaskTrainer(BaseTrainer):
@@ -82,6 +83,8 @@ class TaskTrainer(BaseTrainer):
         self.mixup_alpha = getattr(config, 'mixup_alpha', 0.0) if config else 0.0
         if self.mixup_alpha > 0:
             print(f"Mixup enabled with alpha={self.mixup_alpha}")
+        self.use_sam = getattr(config, 'use_sam', False) if config else False
+        self.manifold_mixup = getattr(config, 'manifold_mixup', False) if config else False
 
         # create directory if it doesn't exist
         if not distributed or (distributed and local_rank == 0):
@@ -338,8 +341,14 @@ class TaskTrainer(BaseTrainer):
                 lam = np.random.beta(self.mixup_alpha, self.mixup_alpha)
                 lam = max(lam, 1 - lam)  # ensure lam >= 0.5 so original dominates
                 idx = torch.randperm(batch_size, device=self.device)
-                mixed_inputs = lam * inputs + (1 - lam) * inputs[idx]
-                outputs = self.model(mixed_inputs)
+
+                if self.manifold_mixup:
+                    # Manifold Mixup: mix in hidden space
+                    outputs = self.model(inputs, manifold_mixup={'lam': lam, 'idx': idx})
+                else:
+                    # Standard input-space Mixup
+                    mixed_inputs = lam * inputs + (1 - lam) * inputs[idx]
+                    outputs = self.model(mixed_inputs)
                 loss = lam * self.criterion(outputs, labels) + (1 - lam) * self.criterion(outputs, labels[idx])
             else:
                 outputs = self.model(inputs)
@@ -351,10 +360,29 @@ class TaskTrainer(BaseTrainer):
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), max_norm=1.0
             )
-            self.optimizer.step()
+
+            if self.use_sam and isinstance(self.optimizer, SAM):
+                # SAM two-step: first_step perturbs params, then second forward-backward at perturbed point
+                self.optimizer.first_step(zero_grad=True)
+                # Second forward-backward at perturbed parameters
+                if self.mixup_alpha > 0 and self.model.training:
+                    if self.manifold_mixup:
+                        outputs2 = self.model(inputs, manifold_mixup={'lam': lam, 'idx': idx})
+                    else:
+                        outputs2 = self.model(mixed_inputs)
+                    loss2 = lam * self.criterion(outputs2, labels) + (1 - lam) * self.criterion(outputs2, labels[idx])
+                else:
+                    outputs2 = self.model(inputs)
+                    loss2 = self.criterion(outputs2, labels)
+                loss2.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.second_step(zero_grad=True)
+            else:
+                self.optimizer.step()
 
             # step scheduler per batch (step-level cosine warmup)
-            self.scheduler.step()
+            if self.scheduler is not None:
+                self.scheduler.step()
 
             # accumulate loss and accuracy
             epoch_loss += loss.item() * batch_size

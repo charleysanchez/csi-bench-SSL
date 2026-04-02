@@ -34,8 +34,8 @@ def main():
 
     parser = argparse.ArgumentParser(description="Masked & CPC CSI Pretraining")
 
-    parser.add_argument("--pretrain_method", type=str, default="masked", choices=["masked", "cpc"],
-                        help="Pretraining method to use.")
+    parser.add_argument("--pretrain_method", type=str, default="masked", choices=["masked", "cpc", "cpc_domain_aware"],
+                        help="Pretraining method to use. 'cpc_domain_aware' is CPC with hard negative mining from same (env,device) domain.")
 
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--task", type=str, default=None,
@@ -52,6 +52,12 @@ def main():
     parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--cpc_k_steps", type=int, default=4, help="Number of steps for CPC future prediction")
+    parser.add_argument("--domain_aware", action="store_true",
+                        help="Enable domain-aware hard negative mining in CPC pretraining.")
+    parser.add_argument("--domain_neg_ratio", type=float, default=0.5,
+                        help="Fraction of negatives sampled from same (env,device) domain (default: 0.5).")
+    parser.add_argument("--cpc_num_negatives", type=int, default=256,
+                        help="Number of negatives per anchor in CPC loss (default: 256).")
 
     parser.add_argument("--win_len", type=int, default=500)
     parser.add_argument("--feature_size", type=int, default=232)
@@ -84,8 +90,10 @@ def main():
     # SEED
     # -------------------------------------------------
 
-    if args.pretrain_method == "cpc":
+    if args.pretrain_method in ("cpc", "cpc_domain_aware"):
         args.model = "cpc"
+    if args.pretrain_method == "cpc_domain_aware":
+        args.domain_aware = True
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -97,7 +105,7 @@ def main():
     # -------------------------------------------------
 
     task_label = "all_tasks" if args.all_tasks else args.task
-    param_str = f"{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}"
+    param_str = f"{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.seed}_{args.pretrain_method}"
     experiment_id = hashlib.md5(param_str.encode()).hexdigest()[:10]
 
     results_dir = os.path.join(
@@ -314,7 +322,7 @@ def main():
 
     if args.pretrain_method == "masked":
         TrainerClass = MaskedTrainer
-    elif args.pretrain_method == "cpc":
+    elif args.pretrain_method in ("cpc", "cpc_domain_aware"):
         TrainerClass = CPCTrainer
     else:
         raise ValueError(f"Unknown pretrain_method: {args.pretrain_method}")
@@ -340,7 +348,7 @@ def main():
 
     summary = {
         "best_epoch": training_results["best_epoch"],
-        "best_val_loss": float(training_results["best_val_loss"]),
+        "best_val_loss": float(training_results.get("best_val_loss", training_results.get("best_train_loss", 0))),
         "experiment_id": experiment_id,
         "task": task_label,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),

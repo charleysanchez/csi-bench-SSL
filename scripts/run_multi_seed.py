@@ -64,6 +64,7 @@ for i, seed in enumerate(SEEDS):
         "--output_dir", args.output_dir,
         "--num_workers", str(args.num_workers),
         "--seed", str(seed),
+        "--experiment_id", f"seed_{seed}"
     ]
     if ENCODER:
         cmd.extend(["--pretrained_encoder", ENCODER])
@@ -75,7 +76,7 @@ for i, seed in enumerate(SEEDS):
         continue
 
     # Find the most recently modified results JSON
-    pattern = os.path.join(RESULTS_BASE, "params_*", f"{MODEL}_{TASK}_results.json")
+    pattern = os.path.join(RESULTS_BASE, "*", f"{MODEL}_{TASK}_results.json")
     result_files = glob.glob(pattern)
     if not result_files:
         print(f"  WARNING: No results file found for seed {seed}")

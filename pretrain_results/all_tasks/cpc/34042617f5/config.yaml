@@ -1,0 +1,30 @@
+training:
+  batch_size: 32
+  epochs: 300
+  warmup_epochs: 5
+  patience: 20
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 256
+  num_heads: 8
+  depth: 4
+  dropout: 0.1
+optimizer:
+  lr: 0.001
+  weight_decay: 1.0e-05
+general:
+  pretrain_method: cpc
+  data_dir: data
+  task: null
+  all_tasks: true
+  model: cpc
+  cpc_k_steps: 4
+  domain_aware: true
+  domain_neg_ratio: 0.5
+  cpc_num_negatives: 256
+  save_dir: pretrain_results
+  seed: 42
+  num_workers: 8
+  pin_memory: false
+  config: null
