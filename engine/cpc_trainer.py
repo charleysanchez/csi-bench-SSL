@@ -347,7 +347,7 @@ class CPCTrainer(BaseTrainer):
             K_neg = min(num_negatives, N)
 
             # --- Negative sampling ---
-            if domain_ids is not None and K_neg > 0:
+            if domain_ids is not None and K_neg > 0 and K_neg > 0 and self.domain_neg_ratio > 0:
                 # Domain-aware hard negative sampling:
                 # For each anchor, sample domain_neg_ratio of negatives from the
                 # same (env, device) domain and the rest randomly.
@@ -361,11 +361,12 @@ class CPCTrainer(BaseTrainer):
                 same_domain_mask = (domain_ids_flat == anchor_domain)
                 same_domain_idx = same_domain_mask.nonzero(as_tuple=False).squeeze(-1)
 
-                if same_domain_idx.numel() >= K_hard and K_hard > 0:
+                if same_domain_idx.numel() >= K_hard:
                     perm = torch.randperm(same_domain_idx.numel(), device=self.device)[:K_hard]
                     hard_idx = same_domain_idx[perm]
                 else:
-                    hard_idx = same_domain_idx  # take all available
+                    # Fewer same-domain samples than requested; take all, fill rest randomly
+                    hard_idx = same_domain_idx
                     K_hard = hard_idx.numel()
                     K_rand = K_neg - K_hard
 
