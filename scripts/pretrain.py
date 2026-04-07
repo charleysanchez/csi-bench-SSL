@@ -67,6 +67,12 @@ def main():
 
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--pin_memory", action="store_true")
+    parser.add_argument("--persistent_workers", action="store_true",
+                        help="Keep DataLoader workers alive between epochs (saves respawn overhead)")
+    parser.add_argument("--prefetch_factor", type=int, default=4,
+                        help="Batches to prefetch per worker (default 4; set 2 if RAM is tight)")
+    parser.add_argument("--amp", action="store_true",
+                        help="Use automatic mixed precision (bf16 on Blackwell/Ampere, fp16 otherwise)")
 
     parser.add_argument("--config", type=str, default=None,
                         help="Path to YAML config file to override args")
@@ -181,23 +187,18 @@ def main():
         print(f"\nTotal train samples: {len(combined_train)}")
         print(f"Total val samples:   {len(combined_val) if combined_val else 0}")
 
-        train_loader = DataLoader(
-            combined_train,
+        _loader_kwargs = dict(
             batch_size=args.batch_size,
-            shuffle=True,
             num_workers=args.num_workers,
             pin_memory=args.pin_memory,
             collate_fn=CollateSkipNone(args.win_len, args.feature_size, for_supervised=False),
+            persistent_workers=args.persistent_workers and args.num_workers > 0,
+            prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
         )
 
-        val_loader = DataLoader(
-            combined_val,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=args.pin_memory,
-            collate_fn=CollateSkipNone(args.win_len, args.feature_size, for_supervised=False),
-        ) if combined_val else None
+        train_loader = DataLoader(combined_train, shuffle=True, **_loader_kwargs)
+
+        val_loader = DataLoader(combined_val, shuffle=False, **_loader_kwargs) if combined_val else None
 
     else:
         print(f"Loading dataset for task: {args.task}")

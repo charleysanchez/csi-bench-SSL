@@ -111,6 +111,17 @@ class CPCTrainer(BaseTrainer):
         self.train_losses = []
         self.best_epoch = 0
 
+        # AMP: bf16 on Blackwell/Ampere, fp16 on older CUDA, no-op on CPU/MPS
+        self.use_amp = getattr(config, "amp", False) and torch.cuda.is_available()
+        if self.use_amp:
+            has_bf16 = torch.cuda.is_bf16_supported()
+            self.amp_dtype = torch.bfloat16 if has_bf16 else torch.float16
+            # GradScaler only needed for fp16 (bf16 doesn't underflow)
+            self.scaler = torch.cuda.amp.GradScaler(enabled=(self.amp_dtype == torch.float16))
+            print(f"AMP enabled: {self.amp_dtype}")
+        else:
+            self.scaler = None
+
     # -------------------------------------------------
     # TRAIN LOOP
     # -------------------------------------------------
@@ -208,21 +219,30 @@ class CPCTrainer(BaseTrainer):
 
             self.optimizer.zero_grad()
 
-            outputs = self.model(inputs)
+            amp_ctx = torch.cuda.amp.autocast(dtype=self.amp_dtype) if self.use_amp else torch.amp.autocast("cpu", enabled=False)
+            with amp_ctx:
+                outputs = self.model(inputs)
 
-            domain_labels = None
-            if self.domain_aware and (envs is not None or devices is not None):
-                domain_labels = {"users": users, "envs": envs, "devices": devices}
+                domain_labels = None
+                if self.domain_aware and (envs is not None or devices is not None):
+                    domain_labels = {"users": users, "envs": envs, "devices": devices}
 
-            loss = self.compute_cpc_loss(outputs, self.k_steps, users, domain_labels=domain_labels)
+                loss = self.compute_cpc_loss(outputs, self.k_steps, users, domain_labels=domain_labels)
 
             if torch.isnan(loss) or torch.isinf(loss):
                 self.optimizer.zero_grad()
                 continue
 
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
+            if self.scaler is not None:
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                self.optimizer.step()
             self.scheduler.step()
 
             total_loss += loss.item() * B
