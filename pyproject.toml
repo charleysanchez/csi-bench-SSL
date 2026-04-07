@@ -1,5 +1,20 @@
 [project]
-dependencies = ["numpy>=2.0", "pandas>=2.0", "scipy>=1.10", "scikit-learn>=1.8.0,<2", "h5py>=3.15.1,<4", "matplotlib>=3.10.8,<4", "seaborn>=0.13.2,<0.14", "ipykernel>=7.2.0,<8", "ipython>=9.10.0,<10", "jupyter-client>=8.8.0,<9", "tqdm>=4.67.3,<5", "pyyaml>=6.0.3,<7", "torch>=2.5.1", "torchvision>=0.20.1"]
+dependencies = [
+    "numpy>=2.0", 
+    "pandas>=2.0", 
+    "scipy>=1.10", 
+    "scikit-learn>=1.8.0,<2", 
+    "h5py>=3.15.1", 
+    "matplotlib>=3.10.8", 
+    "seaborn>=0.13.2", 
+    "ipykernel>=7.2.0", 
+    "ipython>=9.10.0", 
+    "jupyter-client>=8.8.0", 
+    "tqdm>=4.67.3", 
+    "pyyaml>=6.0.3,<7", 
+    "torch>=2.5.1", 
+    "torchvision>=0.20.1"
+]
 name = "csi-bench-SSL"
 requires-python = ">= 3.11"
 version = "0.1.0"
@@ -32,5 +47,5 @@ mps = { features = ["mps"], solve-group = "default" }
 default = { features = ["gpu"], solve-group = "default" }
 
 [tool.pixi.dependencies]
-jupyter = ">=1.1.1,<2"
-ipykernel = ">=7.2.0,<8"
+jupyter = ">=1.1.1"
+ipykernel = ">=7.2.0"

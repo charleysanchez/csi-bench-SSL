@@ -171,8 +171,6 @@ def fit_and_score(train_feats, train_labels, test_feats, test_labels):
         clf = LogisticRegression(
             max_iter=1000,
             C=1.0,
-            multi_class="multinomial",
-            solver="lbfgs",
         )
         clf.fit(X_train, train_labels)
 
