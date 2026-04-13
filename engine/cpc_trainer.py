@@ -8,6 +8,12 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
+
+try:
+    import wandb
+    _WANDB = True
+except ImportError:
+    _WANDB = False
 from tqdm import tqdm
 
 from engine.base_trainer import BaseTrainer
@@ -162,13 +168,20 @@ class CPCTrainer(BaseTrainer):
                 print(f"Train Loss: {train_loss:.6f}")
                 print(f"Time/sample: {train_time:.6f}s")
 
-                records.append(
-                    {
-                        "Epoch": epoch + 1,
-                        "Train Loss": train_loss,
-                        "Time per sample": train_time,
-                    }
-                )
+                record = {
+                    "Epoch": epoch + 1,
+                    "Train Loss": train_loss,
+                    "Time per sample": train_time,
+                }
+                records.append(record)
+                if _WANDB and wandb.run is not None:
+                    wandb.log({
+                        "train/loss": train_loss,
+                        "train/time_per_sample": train_time,
+                        "train/lr": self.optimizer.param_groups[0]["lr"],
+                        "train/domain_neg_ratio": self.domain_neg_ratio,
+                        "epoch": epoch + 1,
+                    })
 
         # Restore best checkpoint
         if best_model is not None:

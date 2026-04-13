@@ -14,6 +14,12 @@ import hashlib
 import yaml
 import time
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 from torch.utils.data import DataLoader, ConcatDataset
 from load.dataloader import get_loaders
 from load.collate import CollateSkipNone
@@ -77,6 +83,11 @@ def main():
     parser.add_argument("--config", type=str, default=None,
                         help="Path to YAML config file to override args")
 
+    parser.add_argument("--wandb_project", type=str, default="csi-bench-SSL",
+                        help="W&B project name (omit to disable W&B)")
+    parser.add_argument("--wandb_run_name", type=str, default=None,
+                        help="W&B run name (defaults to experiment_id)")
+
     parser.add_argument("--emb_dim", type=int, default=256, help="Model embedding dimension (d_model)")
     parser.add_argument("--num_heads", type=int, default=8, help="Number of attention heads")
     parser.add_argument("--depth", type=int, default=4, help="Number of transformer layers")
@@ -121,6 +132,18 @@ def main():
 
     print(f"Experiment ID: {experiment_id}")
     print(f"Results: {results_dir}")
+
+    # -------------------------------------------------
+    # WANDB
+    # -------------------------------------------------
+    if WANDB_AVAILABLE and getattr(args, "wandb_project", None):
+        wandb.init(
+            project=args.wandb_project,
+            name=args.wandb_run_name or experiment_id,
+            config=vars(args),
+            dir=results_dir,
+        )
+        print(f"W&B run: {wandb.run.url}")
 
     # -------------------------------------------------
     # DEVICE

@@ -1,0 +1,48 @@
+# Overnight CPC pretraining config — all tasks, domain-aware, AMP, fast DataLoader.
+#
+# Rationale for each choice:
+#   cpc_k_steps 8:      predict 8 future steps instead of 4; forces the encoder to
+#                       model longer-range temporal structure, which is more task-relevant
+#                       for activities (walking, sitting) than short-range autocorrelation.
+#   cpc_num_negatives 512: more negatives → harder InfoNCE problem → richer representations.
+#   domain_neg_ratio 0.8:  90% of training uses hard negatives from the same env/device,
+#                          maximally pressuring the encoder to ignore domain-specific signal.
+#   hidden_size 512:    double capacity; the 1M-param model underfit given 187k samples.
+#   epochs 150:         loss was still decreasing at 100; give it more time.
+#   amp:                bf16 on Blackwell — ~2x throughput, same convergence.
+#   persistent_workers: avoid worker respawn overhead between epochs.
+#   prefetch_factor 4:  mask HDF5 I/O latency with background prefetch.
+
+pretrain_method: cpc
+all_tasks: true
+
+training:
+  epochs: 150
+  batch_size: 600
+  num_workers: 5
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  amp: true
+
+optimizer:
+  name: adamw
+  lr: 5e-4                 # lower LR for larger batch (linear scaling: 1e-3 * 256/512 ≈ 5e-4)
+  weight_decay: 1e-4
+
+scheduler:
+  name: warmup_cosine
+  warmup_epochs: 10        # longer warmup for stability with large batch
+  min_lr_ratio: 0.05
+
+model_params:
+  win_len: 500
+  feature_size: 232
+  hidden_size: 512
+  cpc_k_steps: 8
+  cpc_num_negatives: 512
+
+domain_aware: true
+domain_neg_ratio: 0.8
+
+wandb_project: csi-bench-SSL

@@ -1,0 +1,45 @@
+{
+  "os":  "macOS-15.6-arm64-arm-64bit-Mach-O",
+  "python":  "CPython 3.14.3",
+  "startedAt":  "2026-03-15T01:58:50.077191Z",
+  "args":  [
+    "--all_tasks",
+    "--pretrain_method",
+    "cpc",
+    "--epochs",
+    "2",
+    "--use_wandb"
+  ],
+  "program":  "/Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/scripts/pretrain.py",
+  "codePath":  "scripts/pretrain.py",
+  "codePathLocal":  "scripts/pretrain.py",
+  "git":  {
+    "remote":  "https://github.com/charleysanchez/csi-bench-SSL.git",
+    "commit":  "0617f0366a9e99d965393b99260cab8a870c5e78"
+  },
+  "email":  "ckirby38@gatech.edu",
+  "root":  "/Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL",
+  "host":  "Cyruss-MacBook-Air.local",
+  "executable":  "/Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/.pixi/envs/default/bin/python",
+  "cpu_count":  8,
+  "cpu_count_logical":  8,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "812127821824"
+    }
+  },
+  "memory":  {
+    "total":  "25769803776"
+  },
+  "apple":  {
+    "name":  "Apple M2",
+    "ecpuCores":  4,
+    "pcpuCores":  4,
+    "gpuCores":  10,
+    "memoryGb":  24,
+    "swapTotalBytes":  "18253611008",
+    "ramTotalBytes":  "25769803776"
+  },
+  "writerId":  "ojlc6a6pt0cfio83ki1u29ukh6qjz99b"
+}

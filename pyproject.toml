@@ -11,9 +11,10 @@ dependencies = [
     "ipython>=9.10.0", 
     "jupyter-client>=8.8.0", 
     "tqdm>=4.67.3", 
-    "pyyaml>=6.0.3,<7", 
-    "torch>=2.5.1", 
-    "torchvision>=0.20.1"
+    "pyyaml>=6.0.3,<7",
+    "torch>=2.5.1",
+    "torchvision>=0.20.1",
+    "wandb>=0.18"
 ]
 name = "csi-bench-SSL"
 requires-python = ">= 3.11"

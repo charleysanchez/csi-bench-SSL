@@ -1,0 +1,111 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            ojlc6a6pt0cfio83ki1u29ukh6qjz99b:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 10
+                    memoryGb: 24
+                    name: Apple M2
+                    pcpuCores: 4
+                    ramTotalBytes: "25769803776"
+                    swapTotalBytes: "18253611008"
+                args:
+                    - --all_tasks
+                    - --pretrain_method
+                    - cpc
+                    - --epochs
+                    - "2"
+                    - --use_wandb
+                codePath: scripts/pretrain.py
+                codePathLocal: scripts/pretrain.py
+                cpu_count: 8
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "994662584320"
+                        used: "812127821824"
+                email: ckirby38@gatech.edu
+                executable: /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/.pixi/envs/default/bin/python
+                git:
+                    commit: 0617f0366a9e99d965393b99260cab8a870c5e78
+                    remote: https://github.com/charleysanchez/csi-bench-SSL.git
+                host: Cyruss-MacBook-Air.local
+                memory:
+                    total: "25769803776"
+                os: macOS-15.6-arm64-arm-64bit-Mach-O
+                program: /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/scripts/pretrain.py
+                python: CPython 3.14.3
+                root: /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL
+                startedAt: "2026-03-15T01:58:50.077191Z"
+                writerId: ojlc6a6pt0cfio83ki1u29ukh6qjz99b
+        m: []
+        python_version: 3.14.3
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 2
+                - 13
+                - 16
+            "4": 3.14.3
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": darwin-arm64
+all_tasks:
+    value: true
+batch_size:
+    value: 32
+config:
+    value: null
+cpc_k_steps:
+    value: 4
+data_dir:
+    value: data
+depth:
+    value: 4
+dropout:
+    value: 0.1
+emb_dim:
+    value: 256
+epochs:
+    value: 2
+feature_size:
+    value: 232
+learning_rate:
+    value: 0.001
+model:
+    value: cpc
+num_heads:
+    value: 8
+num_workers:
+    value: 8
+patience:
+    value: 20
+pin_memory:
+    value: false
+pretrain_method:
+    value: cpc
+save_dir:
+    value: pretrain_results
+seed:
+    value: 42
+task:
+    value: null
+use_wandb:
+    value: true
+wandb_entity:
+    value: null
+wandb_project:
+    value: cs8803hsi
+warmup_epochs:
+    value: 5
+weight_decay:
+    value: 1e-05
+win_len:
+    value: 500

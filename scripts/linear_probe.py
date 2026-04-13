@@ -375,10 +375,10 @@ def _plot_learning_curves(df: pd.DataFrame, save_dir: str):
     x-axis is log-scaled to show few-shot regime clearly.
     """
     split_styles = {
-        "test_id":      dict(color="#2196F3", linestyle="-",  label="In-dist"),
-        "test_xenv":    dict(color="#FF9800", linestyle="--", label="Cross-env"),
-        "test_xuser":   dict(color="#4CAF50", linestyle="-.", label="Cross-user"),
-        "test_xdevice": dict(color="#F44336", linestyle=":",  label="Cross-device"),
+        "test_id":           dict(color="#2196F3", linestyle="-",  label="In-dist"),
+        "test_cross_env":    dict(color="#FF9800", linestyle="--", label="Cross-env"),
+        "test_cross_user":   dict(color="#4CAF50", linestyle="-.", label="Cross-user"),
+        "test_cross_device": dict(color="#F44336", linestyle=":",  label="Cross-device"),
     }
 
     for task in df["task"].unique():
