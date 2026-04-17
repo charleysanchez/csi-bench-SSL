@@ -83,8 +83,10 @@ def main():
     parser.add_argument("--config", type=str, default=None,
                         help="Path to YAML config file to override args")
 
-    parser.add_argument("--wandb_project", type=str, default="csi-bench-SSL",
+    parser.add_argument("--wandb_project", type=str, default=None,
                         help="W&B project name (omit to disable W&B)")
+    parser.add_argument("--wandb_entity", type=str, default=None,
+                        help="W&B entity (team/username)")
     parser.add_argument("--wandb_run_name", type=str, default=None,
                         help="W&B run name (defaults to experiment_id)")
 
@@ -138,6 +140,7 @@ def main():
     # -------------------------------------------------
     if WANDB_AVAILABLE and getattr(args, "wandb_project", None):
         wandb.init(
+            entity=args.wandb_entity or None,
             project=args.wandb_project,
             name=args.wandb_run_name or experiment_id,
             config=vars(args),
@@ -291,11 +294,13 @@ def main():
         })
     
     elif args.model == 'cpc':
+        # hidden_size: prefer explicit --hidden_size, fall back to --emb_dim (CLI alias), then default
+        cpc_hidden = getattr(args, 'hidden_size', None) or getattr(args, 'emb_dim', 256)
         model_kwargs.update({
             'win_len': args.win_len,
             'feature_size': args.feature_size,
-            # Using getattr for safety in case it isn't in the YAML yet
-            'cpc_k_steps': getattr(args, 'cpc_k_steps', 12) 
+            'hidden_size': cpc_hidden,
+            'cpc_k_steps': getattr(args, 'cpc_k_steps', 4),
         })
 
     print(f"Creating {args.model} model with kwargs: {model_kwargs}")

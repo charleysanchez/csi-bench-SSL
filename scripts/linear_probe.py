@@ -240,13 +240,27 @@ def main():
     # -----------------------------------------------------------------------
     # Load encoder
     # -----------------------------------------------------------------------
+    state = torch.load(args.encoder, map_location=device)
+
+    # Auto-detect hidden_size from GRU weights (shape: (3*H, H))
+    if "g_ar.weight_hh_l0" in state:
+        inferred_hidden = state["g_ar.weight_hh_l0"].shape[1]
+        if inferred_hidden != args.hidden_size:
+            print(f"  Auto-detected hidden_size={inferred_hidden} from encoder weights (overrides --hidden_size={args.hidden_size})")
+            args.hidden_size = inferred_hidden
+
+    # Auto-detect cpc_k_steps from W_k length
+    k_steps = sum(1 for k in state if k.startswith("W_k.") and k.endswith(".weight"))
+    if k_steps > 0 and k_steps != args.cpc_k_steps:
+        print(f"  Auto-detected cpc_k_steps={k_steps} from encoder weights")
+        args.cpc_k_steps = k_steps
+
     model = CPCModel(
         feature_size=args.feature_size,
         hidden_size=args.hidden_size,
         cpc_k_steps=args.cpc_k_steps,
     ).to(device)
 
-    state = torch.load(args.encoder, map_location=device)
     missing, unexpected = model.load_state_dict(state, strict=False)
     if missing:
         print(f"  Missing keys (expected if head not saved): {missing}")
