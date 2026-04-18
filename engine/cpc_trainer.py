@@ -139,7 +139,16 @@ class CPCTrainer(BaseTrainer):
         best_model = None
         records = []
 
+        max_train_hours = getattr(self.config, "max_train_hours", None)
+        train_start = time.time()
+
         for epoch in range(epochs):
+            # Time-budget check: stop before the wall-clock limit is hit
+            if max_train_hours is not None:
+                elapsed_h = (time.time() - train_start) / 3600
+                if elapsed_h >= max_train_hours:
+                    print(f"\nTime budget reached ({elapsed_h:.2f}h >= {max_train_hours}h) — stopping after epoch {epoch}.")
+                    break
             self.current_epoch = epoch
 
             # Linear ramp: domain_neg_ratio goes 0.0 -> domain_neg_ratio_max over training
