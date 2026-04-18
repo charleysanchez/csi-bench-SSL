@@ -1,0 +1,38 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-17-2026 11:40:39
+Job ID:    4915289
+User ID:   ckirby38
+Account:   coc
+Job name:  cpc-sweep
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    4915289  (array task 2)
+Run:    k_steps_4
+Extra:  --cpc_k_steps 4 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8
+Node:   atl1-1-03-012-28-0
+==============================
+
+>>> STEP 1: CPC pretraining (k_steps_4)
+Traceback (most recent call last):
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/scripts/pretrain.py", line 32, in <module>
+    from model.registry import PRETRAIN_MODEL_TYPES
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/model/registry.py", line 5, in <module>
+    from model.models import (
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/model/models.py", line 5, in <module>
+    from torchvision.models import resnet18
+ModuleNotFoundError: No module named 'torchvision'
+---------------------------------------
+Begin Slurm Epilog: Apr-17-2026 11:40:49
+Job ID:        4915289
+Array Job ID:  4905660_2
+User ID:       ckirby38
+Account:       coc
+Job name:      cpc-sweep
+Resources:     cpu=5,gres/gpu:h100=1,mem=48G,node=1
+Rsrc Used:     cput=00:00:50,vmem=0,walltime=00:00:10,mem=433692K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-28-0
+---------------------------------------

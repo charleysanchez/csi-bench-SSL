@@ -73,7 +73,7 @@ SAVE_DIR="pretrain_results/sweep"
 echo ""
 echo ">>> STEP 1: CPC pretraining ($NAME)"
 
-pixi run python -u scripts/pretrain.py \
+pixi run -e cuda128 python -u scripts/pretrain.py \
     --pretrain_method cpc \
     --all_tasks \
     --data_dir data \
@@ -116,10 +116,10 @@ echo ">>> STEP 2: Linear probe ($NAME)"
 
 PROBE_DIR="results/linear_probe/${NAME}_${SLURM_JOB_ID}"
 
-pixi run python -u scripts/linear_probe.py \
+pixi run -e cuda128 python -u scripts/linear_probe.py \
     --encoder "$ENCODER" \
     --data_dir data \
-    --tasks HumanActivityRecognition ProximityRecognition HumanIdentification \
+    --tasks FallDetection BreathingDetection \
     --k_shots 1 2 4 8 16 32 64 full \
     --seeds 42 43 44 \
     --batch_size 512 \
