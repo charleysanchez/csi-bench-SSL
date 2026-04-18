@@ -22,7 +22,7 @@
 #SBATCH --constraint=gpu-rtxpro-blackwell|gpu-h100|gpu-h200
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=5
-#SBATCH --time=02:30:00
+#SBATCH --time=03:30:00
 #SBATCH --qos=coc-ice
 #SBATCH --output=./logs/pretrain_%A_%a.out
 #SBATCH --mail-type=END,FAIL
@@ -91,6 +91,7 @@ pixi run python -u scripts/pretrain.py \
     --wandb_project "$WANDB_PROJECT" \
     --wandb_run_name "${WANDB_RUN_NAME}_pretrain" \
     --seed 42 \
+    --max_train_hours 3.0 \
     $EXTRA 2>&1 | tee "logs/pretrain_${SLURM_JOB_ID}_${IDX}_step1.log"
 
 # ------------------------------------------------------------------

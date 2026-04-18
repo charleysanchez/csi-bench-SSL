@@ -79,6 +79,8 @@ def main():
                         help="Batches to prefetch per worker (default 4; set 2 if RAM is tight)")
     parser.add_argument("--amp", action="store_true",
                         help="Use automatic mixed precision (bf16 on Blackwell/Ampere, fp16 otherwise)")
+    parser.add_argument("--max_train_hours", type=float, default=None,
+                        help="Stop training after this many hours (saves best checkpoint). Useful for SLURM time limits.")
 
     parser.add_argument("--config", type=str, default=None,
                         help="Path to YAML config file to override args")
