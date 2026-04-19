@@ -69,6 +69,8 @@ def main():
     parser.add_argument("--feature_size", type=int, default=232)
 
     parser.add_argument("--save_dir", type=str, default="pretrain_results")
+    parser.add_argument("--run_name", type=str, default=None,
+                        help="Override the auto-generated experiment ID as the save subdirectory name.")
     parser.add_argument("--seed", type=int, default=42)
 
     parser.add_argument("--num_workers", type=int, default=8)
@@ -126,8 +128,11 @@ def main():
     # -------------------------------------------------
 
     task_label = "all_tasks" if args.all_tasks else args.task
-    param_str = f"{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.seed}_{args.pretrain_method}"
-    experiment_id = hashlib.md5(param_str.encode()).hexdigest()[:10]
+    if args.run_name:
+        experiment_id = args.run_name
+    else:
+        param_str = f"{args.model}_{args.learning_rate}_{args.batch_size}_{args.epochs}_{args.seed}_{args.pretrain_method}"
+        experiment_id = hashlib.md5(param_str.encode()).hexdigest()[:10]
 
     results_dir = os.path.join(
         args.save_dir, task_label, args.model, experiment_id

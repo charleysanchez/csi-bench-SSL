@@ -92,17 +92,16 @@ pixi run -e cuda128 python -u scripts/pretrain.py \
     --wandb_run_name "${WANDB_RUN_NAME}_pretrain" \
     --seed 42 \
     --max_train_hours 3.0 \
+    --run_name "$NAME" \
     $EXTRA 2>&1 | tee "logs/pretrain_${SLURM_JOB_ID}_${IDX}_step1.log"
 
 # ------------------------------------------------------------------
-# STEP 2: Find saved encoder
+# STEP 2: Locate encoder at known path
 # ------------------------------------------------------------------
-ENCODER=$(find "$SAVE_DIR/all_tasks/cpc" -name "encoder_weights.pt" \
-    -newer "logs/pretrain_${SLURM_JOB_ID}_${IDX}_step1.log" \
-    | sort -t/ -k1 | tail -1)
+ENCODER="$SAVE_DIR/all_tasks/cpc/${NAME}/encoder_weights.pt"
 
-if [ -z "$ENCODER" ]; then
-    echo "ERROR: encoder_weights.pt not found under $SAVE_DIR/all_tasks/cpc"
+if [ ! -f "$ENCODER" ]; then
+    echo "ERROR: encoder not found at $ENCODER"
     exit 1
 fi
 
