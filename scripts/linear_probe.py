@@ -47,6 +47,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+try:
+    import wandb
+    _WANDB_AVAILABLE = True
+except ImportError:
+    _WANDB_AVAILABLE = False
+
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score, accuracy_score
@@ -215,9 +221,31 @@ def main():
 
     parser.add_argument("--save_dir", type=str, default="results/linear_probe",
                         help="Directory for CSV results and plots")
+    parser.add_argument("--wandb_project", type=str, default=None,
+                        help="W&B project name (omit to disable W&B logging)")
+    parser.add_argument("--wandb_entity", type=str, default=None,
+                        help="W&B entity (team or username)")
+    parser.add_argument("--wandb_run_name", type=str, default=None,
+                        help="W&B run display name")
 
     args = parser.parse_args()
     os.makedirs(args.save_dir, exist_ok=True)
+
+    # -----------------------------------------------------------------------
+    # W&B init
+    # -----------------------------------------------------------------------
+    _wandb_run = None
+    if _WANDB_AVAILABLE and args.wandb_project:
+        _wandb_run = wandb.init(
+            entity=args.wandb_entity or None,
+            project=args.wandb_project,
+            name=args.wandb_run_name,
+            config=vars(args),
+        )
+        # k_shot_int as the x-axis for all probe/* metrics so wandb draws
+        # learning curves with shots on the x-axis, not global step.
+        wandb.define_metric("probe/k_shot_int")
+        wandb.define_metric("probe/*", step_metric="probe/k_shot_int")
 
     # Parse k_shots: convert to int or -1 for "full"
     k_shot_values = []
@@ -358,6 +386,15 @@ def main():
                 }
                 all_records.append(record)
 
+                if _wandb_run is not None:
+                    wandb.log({
+                        "probe/k_shot_int": record["k_shot_int"],
+                        f"probe/{task}/{split}/acc_mean": record["acc_mean"],
+                        f"probe/{task}/{split}/acc_std":  record["acc_std"],
+                        f"probe/{task}/{split}/f1_mean":  record["f1_mean"],
+                        f"probe/{task}/{split}/f1_std":   record["f1_std"],
+                    })
+
                 print(
                     f"  k={k_label:>4}  {split:<20}  "
                     f"acc={record['acc_mean']:.3f}±{record['acc_std']:.3f}  "
@@ -381,6 +418,22 @@ def main():
     # -----------------------------------------------------------------------
     _plot_learning_curves(results_df, args.save_dir)
     print(f"Plots saved → {args.save_dir}/")
+
+    # -----------------------------------------------------------------------
+    # W&B: full results table + summary scalars for cross-run comparison
+    # -----------------------------------------------------------------------
+    if _wandb_run is not None:
+        wandb.log({"probe/results_table": wandb.Table(dataframe=results_df)})
+
+        # Pin full-shot F1/acc to run summary so the wandb runs table shows
+        # the most informative single number per run without opening each run.
+        full_shot = results_df[results_df["k_shot"] == "full"]
+        for _, row in full_shot.iterrows():
+            prefix = f"probe/{row['task']}/{row['split']}"
+            wandb.run.summary[f"{prefix}/f1_full"]  = row["f1_mean"]
+            wandb.run.summary[f"{prefix}/acc_full"] = row["acc_mean"]
+
+        wandb.finish()
 
 
 def _plot_learning_curves(df: pd.DataFrame, save_dir: str):

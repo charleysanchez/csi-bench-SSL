@@ -123,7 +123,7 @@ class CPCTrainer(BaseTrainer):
             has_bf16 = torch.cuda.is_bf16_supported()
             self.amp_dtype = torch.bfloat16 if has_bf16 else torch.float16
             # GradScaler only needed for fp16 (bf16 doesn't underflow)
-            self.scaler = torch.cuda.amp.GradScaler(enabled=(self.amp_dtype == torch.float16))
+            self.scaler = torch.amp.GradScaler("cuda", enabled=(self.amp_dtype == torch.float16))
             print(f"AMP enabled: {self.amp_dtype}")
         else:
             self.scaler = None
@@ -241,7 +241,7 @@ class CPCTrainer(BaseTrainer):
 
             self.optimizer.zero_grad()
 
-            amp_ctx = torch.cuda.amp.autocast(dtype=self.amp_dtype) if self.use_amp else torch.amp.autocast("cpu", enabled=False)
+            amp_ctx = torch.amp.autocast("cuda", dtype=self.amp_dtype) if self.use_amp else torch.amp.autocast("cpu", enabled=False)
             with amp_ctx:
                 outputs = self.model(inputs)
 
