@@ -20,7 +20,7 @@
 #   3  no_domain_aware
 
 #SBATCH --job-name=cpc-probe
-#SBATCH --array=0-3
+#SBATCH --array=0-8
 #SBATCH -N1 --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --constraint=gpu-rtxpro-blackwell|gpu-h100|gpu-h200
@@ -40,6 +40,11 @@ NAMES=(
     "baseline"
     "k_steps_4"
     "no_domain_aware"
+    "k_steps_2"
+    "k_steps_6"
+    "k_steps_12"
+    "random_k"
+    "multi_k"
 )
 
 IDX=${SLURM_ARRAY_TASK_ID:-0}
@@ -84,7 +89,7 @@ echo ">>> Running linear probe for $NAME"
 pixi run -e cuda128 python -u scripts/linear_probe.py \
     --encoder "$ENCODER" \
     --data_dir data \
-    --tasks FallDetection BreathingDetection \
+    --tasks HumanActivityRecognition ProximityRecognition \
     --k_shots 1 2 4 8 16 32 64 full \
     --seeds 42 43 44 \
     --batch_size 512 \

@@ -17,13 +17,13 @@
 #   3  no_domain      k_steps=8, 512 neg, hidden=512, domain_neg=0.0   ← ablation: no hard neg
 
 #SBATCH --job-name=cpc-pretrain
-#SBATCH --array=0-3
+#SBATCH --array=0-8
 #SBATCH -N1 --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --constraint=gpu-rtxpro-blackwell|gpu-h100|gpu-h200
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=5
-#SBATCH --time=04:00:00
+#SBATCH --time=06:30:00
 #SBATCH --qos=coc-ice
 #SBATCH --output=./logs/pretrain_%A_%a.out
 #SBATCH --mail-type=END,FAIL
@@ -37,6 +37,11 @@ NAMES=(
     "baseline"
     "k_steps_4"
     "no_domain_aware"
+    "k_steps_2"
+    "k_steps_6"
+    "k_steps_12"
+    "random_k"
+    "multi_k"
 )
 
 EXTRA_ARGS=(
@@ -44,6 +49,11 @@ EXTRA_ARGS=(
     "--cpc_k_steps 4 --cpc_num_negatives 256 --emb_dim 256 --domain_aware --domain_neg_ratio 0.5"
     "--cpc_k_steps 4 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
     "--cpc_k_steps 8 --cpc_num_negatives 512 --emb_dim 512 --domain_neg_ratio 0.0"
+    "--cpc_k_steps 2 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
+    "--cpc_k_steps 6 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
+    "--cpc_k_steps 12 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
+    "--cpc_k_mode random_k --cpc_k_values 4 8 12 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
+    "--cpc_k_mode multi_k --cpc_k_values 4 8 12 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8"
 )
 
 IDX=${SLURM_ARRAY_TASK_ID:-0}
@@ -96,7 +106,7 @@ pixi run -e cuda128 python -u scripts/pretrain.py \
     --wandb_project "$WANDB_PROJECT" \
     --wandb_run_name "${NAME}_job${SLURM_JOB_ID}_pretrain" \
     --seed 42 \
-    --max_train_hours 3.5 \
+    --max_train_hours 6.0 \
     --run_name "$NAME" \
     $EXTRA 2>&1 | tee "logs/pretrain_${SLURM_JOB_ID}_${IDX}.log"
 

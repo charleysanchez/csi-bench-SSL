@@ -1,0 +1,550 @@
+╭─── Claude Code v2.1.92 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back jeff!                 │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│ Sonnet 4.6 · Claude Pro · cyruskirbus@gmail.com's  │                         │
+│ Organization                                       │                         │
+│          ~/gatech/cs8803hsi/csi-bench-SSL          │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+  ✻ Voice mode is now available · /voice to enable
+
+❯ /clear                                                                        
+  ⎿  (no content)
+
+❯ /mcp 
+  ⎿  MCP dialog dismissed
+
+❯ The latest overnight runs just finished and the results are on wandb. please  
+analyze them in the context of improving generalization to new tasks, users,    
+environments, and devices.                                                      
+
+⏺ wandb - list_entities_tool (MCP)
+  ⎿  Error: The operation timed out.
+
+⏺ wandb - query_wandb_entity_projects (MCP)
+  ⎿  {
+       "result": "{\"projects\": {\"flu-detection\": [{\"name\": \"homekit-
+     cpc\", \"entity\": \"flu-detection\", \"description\": null, \"visibil
+     … +62 lines (ctrl+o to expand)
+
+⏺ wandb - probe_project_tool (MCP)(entity_name: "cs8803hsi", project_name:
+                                  "ood-detection")
+  ⎿  {
+       "result": "{\"entity\": \"cs8803hsi\", \"project\": \"ood-detection\
+     ", \"run_count\": 24, \"sampled_runs\": 5, \"run_states\": {\"crashed\
+     … +15 lines (ctrl+o to expand)
+
+⏺ wandb - probe_project_tool (MCP)(entity_name: "cs8803hsi", project_name:
+                                  "cs8803hsi")
+  ⎿  {
+       "result": "{\"entity\": \"cs8803hsi\", \"project\": \"cs8803hsi\", \
+     "run_count\": 1, \"sampled_runs\": 1, \"run_states\": {\"finished\": 1
+     … +12 lines (ctrl+o to expand)
+
+⏺ wandb - query_wandb_tool (MCP)(query: "\nquery GetRecentRuns($project:
+                                String!, $entity: String!) {\n  project(name:
+                                $project, entityName: $entity) {\n
+                                runs(first: 30, order: \"-createdAt\") {\n
+                                edges {\n        node {\n          id\n
+                                 name\n          displayName\n          state\n
+                                         createdAt\n          config\n
+                                summaryMetrics\n          tags\n
+                                group\n        }\n      }\n    }\n  }\n}\n",
+                                variables: {"project":"ood-detection","entity":"
+                                cs8803hsi"})
+  ⎿  ⚠ Large MCP response (~12.9k tokens), this can fill up context quickly
+  ⎿  {"result":{"project":{"runs":{"edges":[{"node":{"id":"UnVuOnYxOnUwdWs2
+     cWRmOm9vZC1kZXRlY3Rpb246Y3M4ODAzaHNp","name":"u0uk6qdf","displayName":
+     "no_domain_aware_job5045385_probe","state":"finished","createdAt":"202
+     … +736 lines (ctrl+o to expand)
+
+  Read 1 file (ctrl+o to expand)
+
+❯ /status 
+  ⎿  Status dialog dismissed
+
+⏺ Here's the analysis of the 4 overnight variants, focused on generalization.
+
+  ---
+  Run Overview (Apr 23, cs8803hsi/ood-detection)
+
+  4 pretrain + 4 probe runs completed. All CPC, all_tasks=True, evaluated on
+  FallDetection + BreathingDetection.
+
+  Config differences
+
+  ┌────────────────┬─────────────┬────────┬────────┬──────────┬────────────┐
+  │    Variant     │ domain_awar │ k_step │ emb_di │ neg_rati │ cpc_num_ne │
+  │                │      e      │   s    │   m    │    o     │     g      │
+  ├────────────────┼─────────────┼────────┼────────┼──────────┼────────────┤
+  │ baseline       │ True        │ 4      │ 256    │ 0.5      │ 256        │
+  ├────────────────┼─────────────┼────────┼────────┼──────────┼────────────┤
+  │ k_steps_4      │ True        │ 4      │ 512    │ 0.8      │ 512        │
+  ├────────────────┼─────────────┼────────┼────────┼──────────┼────────────┤
+  │ overnight_v1   │ True        │ 8      │ 512    │ 0.8      │ 512        │
+  ├────────────────┼─────────────┼────────┼────────┼──────────┼────────────┤
+  │ no_domain_awar │ False       │ 8      │ 512    │ 0        │ 512        │
+  │ e              │             │        │        │          │            │
+  └────────────────┴─────────────┴────────┴────────┴──────────┴────────────┘
+
+  Probe Results (test_id, full-shot)
+
+  ┌─────────────────┬─────────┬────────┬──────────┬──────────┬─────────────┐
+  │     Variant     │  Fall   │ Fall   │ Breath   │ Breath   │  Pretrain   │
+  │                 │   acc   │   F1   │   acc    │    F1    │    loss     │
+  ├─────────────────┼─────────┼────────┼──────────┼──────────┼─────────────┤
+  │ no_domain_aware │ 0.907   │ 0.904  │ 0.752    │ 0.742    │ 0.0485      │
+  ├─────────────────┼─────────┼────────┼──────────┼──────────┼─────────────┤
+  │ overnight_v1    │ 0.907   │ 0.904  │ 0.758    │ 0.745    │ 0.0479      │
+  ├─────────────────┼─────────┼────────┼──────────┼──────────┼─────────────┤
+  │ k_steps_4       │ 0.873   │ 0.869  │ 0.768    │ 0.762    │ 0.0333      │
+  ├─────────────────┼─────────┼────────┼──────────┼──────────┼─────────────┤
+  │ baseline        │ 0.843   │ 0.838  │ 0.739    │ 0.732    │ 0.0199      │
+  └─────────────────┴─────────┴────────┴──────────┴──────────┴─────────────┘
+
+  ---
+  Generalization Analysis
+
+  1. Domain awareness barely helps (in-distribution)
+
+  no_domain_aware ties overnight_v1 exactly on FallDetection (0.907) and is only
+   0.6% behind on BreathingDetection. If domain contrastive learning were the
+  main driver of generalization, you'd expect a larger gap even on test_id. The
+  curriculum isn't hurting, but it's also not delivering a clear win.
+
+  Implication: The benefit of domain awareness may only appear on OOD splits
+  (new users/devices/environments) — which we don't see in these summary
+  metrics. The test_id split is likely same-distribution held-out users.
+
+  2. k_steps matters — but task-dependently
+
+  - k_steps=8 dominates on FallDetection (+3.4% acc vs k_steps=4, same other
+  configs)
+  - k_steps=4 wins on BreathingDetection (+1% acc vs k_steps=8)
+
+  FallDetection is a coarse, long-duration event — longer future context (8
+  steps) captures temporal coherence across the fall arc. BreathingDetection is
+  a periodic signal — shorter context (4 steps) may avoid aliasing or focus on
+  local regularity. This task-specific optimum is a potential generalization
+  hazard: a single k_steps may not generalize across task classes.
+
+  3. Pretrain loss inverts downstream performance
+
+  Baseline has the lowest pretrain loss (0.020) but worst downstream accuracy.
+  This is the classic SSL sign that lower loss ≠ better representations —
+  smaller emb_dim=256 + fewer negatives likely causes the model to fit easier
+  shortcuts.
+
+  4. Domain neg curriculum hasn't converged
+
+  Target domain_neg_ratio was 0.8, but actual achieved by end of training:
+  - overnight_v1: 0.66 (epoch 124)
+  - k_steps_4: 0.69 (epoch 129)
+
+  Neither reached the target. The 3.5h wall clock limit is cutting training
+  short. The domain-aware curriculum is still ramping — you're measuring it
+  before it has fully deployed domain negatives.
+
+  5. Capacity matters: emb_dim 256→512 is worth it
+
+  baseline vs k_steps_4 isolates emb_dim (256 vs 512), neg count (256 vs 512),
+  and neg_ratio (0.5 vs 0.8). The larger config gains +3% Fall, +2.9% Breathing.
+   For a heterogeneous deployment (new devices/environments), larger embeddings
+  should capture more invariant features.
+
+  ---
+  Recommendations for Generalization
+
+  Immediate:
+  1. Add OOD eval to the probe — without cross-user/cross-device test splits,
+  you can't actually measure generalization. test_id only shows in-distribution
+  accuracy.
+  2. Increase max_train_hours to 5-6h or add a floor on domain_neg_ratio to
+  ensure the curriculum completes. The domain-aware benefit may be hidden
+  because training ends before domain negatives dominate.
+
+  Architectural:
+  3. Task-adaptive k_steps: k_steps=8 for motion/event tasks, k_steps=4 for
+  periodic tasks — or tune k_steps as a hyperparameter per task family rather
+  than globally.
+  4. overnight_v1 is the best single model (Fall+Breath balance, domain-aware,
+  large emb) — use it as the reference going forward.
+
+  Hypothesis to test:
+  5. Does domain_aware gap vs no_domain_aware widen on OOD splits? If domain
+  contrastive learning is doing its job, the 0.6% test_id gap should become
+  3-5%+ on cross-device or cross-user splits. If it doesn't, the domain
+  negatives aren't capturing the right invariance.
+
+✻ Worked for 2m 59s
+
+❯ /effort high                                                                  
+  ⎿  Set effort level to high: Comprehensive implementation with extensive
+     testing and documentation · burns fastest — medium handles most tasks
+
+❯ /effort low                                                                   
+  ⎿  Set effort level to low: Quick, straightforward implementation with minimal
+      overhead
+
+❯ /effort medium                                                                
+  ⎿  Set effort level to medium: Balanced approach with standard implementation
+     and testing
+
+❯ /effort high                                                                  
+  ⎿  Set effort level to high: Comprehensive implementation with extensive
+     testing and documentation · burns fastest — medium handles most tasks
+❯ /effort max                                                                   
+  ⎿  Set effort level to max (this session only): Maximum capability with
+     deepest reasoning (Opus 4.6 only)
+
+❯ /effort high                                                                  
+  ⎿  Set effort level to high: Comprehensive implementation with extensive
+     testing and documentation · burns fastest — medium handles most tasks
+
+❯ I have a few directions I'd like to take this. The point of this research is  
+to evaluate whether pretraining can result in models with better generalization 
+ (to new users, envs, devices) than models trained on a source domain via       
+supervised learning. For me to be confident in the results, that means that I   
+need to compare the supervised approaches against the pretraining approaches on 
+ apples-to-apples tasks and metrics. Currently, the slurm pipeline doesn't do   
+that even though the supervised pipeline is there. This needs correction. Next, 
+ I believe that the train/test/eval split in the dataset already corresponds to 
+ cross-user/cross-device splits (confirm this). Third, I agree with increasing  
+the max train hours. Fourth, I agree that adaptive k-steps is necessary. Add an 
+ ablation that tests a variety of k-steps, includding one that randomly chooses 
+ a single value of k and one that averages loss over multiple values of k. Use  
+the best single model as the reference architecture. Do you understand          
+thoroughly what the ask is?                                                     
+
+⏺ Understood. Let me read the codebase before confirming — I need to verify the
+  dataset split structure and understand both pipelines before committing to a
+  plan.
+
+  Searched for 4 patterns (ctrl+o to expand)
+
+⏺ Good. Now let me read the critical files in parallel.
+
+  Read 5 files (ctrl+o to expand)
+
+⏺ Now let me read the CPC model and the engine:
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Now let me check the actual split files in the data:
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+❯ /status 
+  ⎿  Status dialog dismissed
+
+⏺ Let me check the actual data directory structure more thoroughly:
+
+⏺ Bash(ls /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/data/ 2>/dev/null &&
+      echo "---" && for d in
+      /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL/data/*/splits;…)
+  ⎿  BreathingDetection/
+     FallDetection/
+     HumanActivityRecognition/
+     … +30 lines (ctrl+o to expand)
+
+⏺ Let me check the dataset README and metadata to understand the
+  easy/medium/hard split semantics:
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ I have a thorough read of the codebase. Here's my full understanding — confirm
+   before I write anything.
+
+  ---
+  What I found
+
+  Item 2 (split structure) — partially confirmed, partially wrong:
+
+  The train_id/val_id/test_id splits do separate samples by some held-out
+  criterion, but the actual structure depends on the task:
+
+  - FallDetection and BreathingDetection (currently evaluated): test_easy,
+  test_medium, test_hard only — no test_cross_user/env/device. These are
+  difficulty tiers, not explicit domain splits.
+  - HumanActivityRecognition, HumanIdentification, ProximityRecognition: have
+  explicit test_cross_user.json, test_cross_env.json, test_cross_device.json.
+
+  So the answer to your confirmation request is: the cross-domain splits exist, 
+  but only for 3 of the 7 tasks, and the 2 tasks currently in the probe 
+  (FallDetection, BreathingDetection) are not among them. The WandB results we
+  analyzed only show test_id because there's nothing else to load for those
+  tasks.
+
+  ---
+  My understanding of the 4 asks
+
+  1. Apples-to-apples supervised vs. pretrained in slurm:
+  - Add a slurm_supervised_sweep.sh that runs train_supervised.py on the same 
+  tasks evaluated by the probe — and the probe needs to be switched to tasks
+  that have OOD splits: at minimum HumanActivityRecognition +
+  ProximityRecognition (they have test_cross_user/env/device)
+  - Both supervised and SSL+probe should report: acc + F1 on test_id,
+  test_cross_user, test_cross_env, test_cross_device
+  - Log both to the same W&B project so runs are directly comparable
+  - The supervised baseline trains on full train_id; the SSL probe also uses
+  full train_id as the "full" k-shot — this is the apples-to-apples condition
+
+  2. Train/test split confirmation: as above — need to swap tasks to HAR +
+  ProximityRecognition for true cross-domain eval. Keep
+  FallDetection/BreathingDetection if you want difficulty-tiered results
+  separately.
+
+  3. Increase max_train_hours: change 3.5h → 6h, bump SLURM --time from 04:00:00
+   → 07:00:00 (1h buffer).
+
+  4. Adaptive k-steps ablation:
+  - Modify CPCModel and CPCTrainer.compute_cpc_loss to support two new modes:
+    - --cpc_k_mode random_k: each batch samples a random single k from
+  {1..k_max}
+    - --cpc_k_mode multi_k: computes and averages loss over all k in {1..k_max}
+  (current behavior, but keep it explicit)
+  - Add ablation variants to the pretrain sweep array: fixed k=2, k=4 (already
+  exists), k=8 (overnight_v1), k=12, plus random_k and multi_k variants
+  - Reference for probe comparison: overnight_v1
+
+  ---
+  Two questions before I proceed:
+
+  1. Supervised comparison scope: Should the supervised baseline be trained
+  per-task (one model per task) using the same model architecture as the CPC
+  classifier (CPCClassifier)? Or a different architecture (e.g., the
+  transformer)?
+  2. k-steps ablation range: For the fixed-k ablation, what values do you want —
+   just {2, 4, 8, 12}? And for random_k, sample uniformly from {1..8} (or
+  {1..12})?
+
+✻ Brewed for 12m 28s
+
+❯ /caveman:caveman                                                              
+
+⏺ Caveman active.
+
+  Two blockers before code:
+
+  1. Supervised arch: CPCClassifier (same encoder as SSL) or
+  TransformerClassifier? Matters for fairness — if supervised uses CPC arch,
+  comparison isolates pretraining benefit from arch choice.
+  2. k-steps range: Fixed ablation values? Random sample from {1..k_max} or
+  specific set? Suggest {2, 4, 6, 8, 12} fixed + random_k ∈ {4,8} + multi_k = 
+  {4,8} averaged. Confirm or override.
+
+❯ 1. The supervised arch should use the transformerclassifier. I believe it's   
+what the original paper we're comparing against used. 2. I agree with your      
+suggestions, but perhaps the random and multi should include 3 k values         
+
+❯ /status 
+  ⎿  Status dialog dismissed
+
+⏺ Solid. Random/multi uses {4, 8, 12}. Let me read pretrain.py and the
+  supervised config before coding:
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Key insight from pretrain.py line 174: --all_tasks already excludes
+  HumanActivityRecognition, ProximityRecognition, HumanIdentification from
+  pretraining. So probe on those tasks is already clean — zero leakage. Paper's
+  supervised config: TransformerClassifier, emb_dim=256, depth=4, num_heads=8.
+
+  Implementing all changes now:
+⏺ Now implementing CPCModel and CPCTrainer changes:
+
+⏺ Update(model/models.py)
+  ⎿  Added 10 lines, removed 2 lines
+      1014      """
+      1015      Contrastive Predictive Coding (CPC) Model.
+      1016      Uses a feature encoder (g_enc) and an autoregressive mode
+            l (g_ar) (GRU).
+      1017 +                                                             
+      1018 +    cpc_k_values: if provided (list of ints), overrides cpc_k
+           +_steps with max(cpc_k_values).                               
+      1019 +                  Used by random_k and multi_k training modes
+           + so W_k covers all needed steps.                             
+      1020      """
+      1018 -    def __init__(self, feature_size=232, hidden_size=256, cpc
+           -_k_steps=4, win_len=None):                                   
+      1021 +    def __init__(self, feature_size=232, hidden_size=256, cpc
+           +_k_steps=4, win_len=None,                                    
+      1022 +                 cpc_k_values=None):                         
+      1023          super().__init__()
+      1024          self.feature_size = feature_size
+      1025          self.hidden_size = hidden_size
+      1022 -        self.cpc_k_steps = cpc_k_steps                       
+      1026 +        # adaptive modes: build W_k up to max(k_values) so al
+           +l prediction heads exist                                     
+      1027 +        if cpc_k_values:                                     
+      1028 +            self.cpc_k_steps = max(cpc_k_values)             
+      1029 +        else:                                                
+      1030 +            self.cpc_k_steps = cpc_k_steps                   
+      1031  
+      1032          # g_enc: Feature Encoder (x_t -> z_t)
+      1033          # BUG FIX: Replaced non-causal padding Conv1d with Ca
+            usalConv1d.
+
+⏺ Now update CPCTrainer.compute_cpc_loss to support the three modes:
+
+⏺ Update(engine/cpc_trainer.py)
+  ⎿  Added 7 lines
+      70          self.local_rank = local_rank
+      71          self.k_steps = getattr(config, "cpc_k_steps", k_steps)
+      72  
+      73 +        # Adaptive k-steps mode: fixed (default) | random_k | m
+         +ulti_k                                                         
+      74 +        self.k_mode = getattr(config, "cpc_k_mode", "fixed") if
+         + config else "fixed"                                           
+      75 +        raw_k_values = getattr(config, "cpc_k_values", None) if
+         + config else None                                              
+      76 +        self.k_values = list(raw_k_values) if raw_k_values else
+         + None                                                          
+      77 +        if self.k_mode in ("random_k", "multi_k") and self.k_va
+         +lues:                                                          
+      78 +            print(f"CPC k_mode={self.k_mode}, k_values={self.k_
+         +values}")                                                      
+      79 +                                                               
+      80          # Domain-aware CPC: use domain labels to create harder 
+          negatives
+      81          self.domain_aware = getattr(config, "domain_aware", Fal
+          se) if config else False
+      82          # Max fraction of negatives to sample from same domain 
+          — linearly ramped from 0.0
+
+⏺ Now update compute_cpc_loss to dispatch on k_mode:
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ /status 
+  ⎿  Status dialog dismissed
+
+! ls                                                                            
+  ⎿  BD_mask_visualization.png
+     configs
+     csi-bench-SSL.code-workspace
+     … +26 lines (ctrl+o to expand)
+
+! ls data                                                                       
+  ⎿  BreathingDetection
+     dataset-metadata.json
+     FallDetection
+     … +7 lines (ctrl+o to expand)
+
+! ls data/BreathingDetection                                                    
+  ⎿  metadata
+     splits
+     sub_Human
+
+! ls data/BreathingDetection/splits                                             
+  ⎿  test_easy_id.json
+     test_hard_id.json
+     test_id.json
+     … +3 lines (ctrl+o to expand)
+
+! cat data/BreathingDetection/splits/test_easy_id.json                          
+  ⎿  
+     Output too large (355.7KB). Full output saved to: /Users/cyruskirby/.c
+     laude/projects/-Users-cyruskirby-gatech-cs8803hsi-csi-bench-SSL/2a9434
+     … +29 lines (ctrl+o to expand)
+
+! cat data/BreathingDetection/splits/test_easy_id.json | head -n 5                ⎿  
+     Output too large (355.7KB). Full output saved to: /Users/cyruskirby/.c
+     laude/projects/-Users-cyruskirby-gatech-cs8803hsi-csi-bench-SSL/2a9434
+     … +29 lines (ctrl+o to expand)
+
+! cat data/BreathingDetection/splits/test_hard_id.json | head -n 5              
+  ⎿  
+     Output too large (335.1KB). Full output saved to:
+     /Users/cyruskirby/.claude/projects/-Users-cyruskirby-gatech-cs8803hsi-csi-b
+     ench-SSL/2a9434a9-c9b7-41bc-9611-608c49b4fc5a/tool-results/b52iyzgzs.txt
+
+     Preview (first 2KB):
+     ["Human_U23_E09_empty_NLOS_FanOn_EchoPlus_hard_240_238009",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df32b_hard_256_1115018",
+     "Human_U23_E09_empty_NLOS_FanOn_EchoDot_3gen_hard_240_192000",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df32b_hard_256_147016",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df583_hard_256_753026",
+     "Human_U06_E10_sleep_HC_near_Fridge_Hex_1cd6be1df4c7_hard_256_5889014",
+     "Human_U23_E09_empty_NLOS_FanOn_GoogleNestHub_hard_240_319028",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df30d_hard_256_1278000",
+     "Human_U06_E10_sleep_Set2_Hex_1cd6be198999_hard_256_17683000",
+     "Human_U06_E10_sleep_HC_near_Fridge_Hex_1cd6be1df32b_hard_256_3054020",
+     "Human_U23_E09_empty_NLOS_FanOn_EchoPlus_hard_240_229027",
+     "Human_U23_E09_empty_NLOS_FanOn_GoogleNestHub_hard_240_277018",
+     "Human_U06_E10_sleep_Set3_Hex_1cd6be198931_hard_256_14906001",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df583_hard_256_774025",
+     "Human_U23_E09_sleep_NLOS_FanOn_GoogleNestHub_hard_240_387014",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df3db_hard_256_528010",
+     "Human_U06_E10_sleep_HC_near_Fridge_Hex_1cd6be1df3e1_hard_256_3747008",
+     "Human_U23_E09_sleep_NLOS_FanOn_GoogleNestHub_hard_240_390025",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df32b_hard_256_259016",
+     "Human_U06_E10_sleep_HC_on_DiningTable_Hex_1cd6be1df335_hard_256_1130011",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df32b_hard_256_183000",
+     "Human_U06_E10_sleep_Set3_Hex_1cd6be198a97_hard_256_32039000",
+     "Human_U23_E09_empty_NLOS_FanOn_EchoDot_2gen_hard_112_2005",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df30d_hard_256_1753002",
+     "Human_U23_E09_empty_NLOS_FanOn_EchoPlus_hard_240_253004",
+     "Human_U06_E10_sleep_Set2_Hex_1cd6be198a63_hard_256_3612000",
+     "Human_U06_E10_empty_HC_near_Fridge_Hex_1cd6be1df583_hard_256_5140002",
+     "Human_U06_E10_sleep_HC_near_Fridge_Hex_1cd6be1df4c7_hard_256_2599017",
+     "Human_U06_E10_sleep_HC_near_Fridge_Hex_1cd6be1df3e1_hard_256_2507014",
+     "Human_U06_E10_sleep_Set2_Hex_1cd6be198999
+     ...
+
+
+❯ Your context is nearly empty. leave a prompt for gemini to pick this up. Be   
+brief.                                                                          
+
+❯ /status 
+  ⎿  Status dialog dismissed
+
+⏺ HANDOFF for csi-bench-SSL project
+
+  Repo: /Users/cyruskirby/gatech/cs8803hsi/csi-bench-SSL | Branch:
+  feature/building
+
+  Goal: 4 changes in flight. Two edits already made (partial):
+
+  Already done:
+  - model/models.py: CPCModel.__init__ accepts cpc_k_values list → sets
+  cpc_k_steps=max(k_values)
+  - engine/cpc_trainer.py: Added k_mode/k_values attrs in __init__
+
+  Remaining (implement in order):
+
+  1. engine/cpc_trainer.py compute_cpc_loss: Replace single loop with dispatch
+  on self.k_mode: fixed = current behavior (k=1..k_steps); random_k = pick ONE k
+   randomly from self.k_values per call; multi_k = average loss over all k in
+  self.k_values. k_values=[4,8,12] for adaptive modes.
+  2. scripts/pretrain.py: Add --cpc_k_mode (choices: fixed/random_k/multi_k,
+  default fixed) and --cpc_k_values (nargs='+', type=int). Wire to CPCModel
+  kwargs (cpc_k_values) and store on args for CPCTrainer to read via
+  getattr(config, ...).
+  3. scripts/train_supervised.py: Add --wandb_project/entity/run_name args. Init
+   wandb after arg parse. At end, log all_results as
+  supervised/{task}/{split}/acc_mean + f1_mean and pin to wandb.run.summary.
+  4. scripts/slurm_pretrain_sweep.sh: Expand --array=0-3 → 0-8. Add indices 4-8:
+   k_steps_2, k_steps_6, k_steps_12, random_k, multi_k. Change
+  max_train_hours=3.5 → 6.0, --time=04:00:00 → 07:00:00.
+  5. scripts/slurm_linear_probe_sweep.sh: Expand array 0-8. Change --tasks 
+  FallDetection BreathingDetection → --tasks HumanActivityRecognition 
+  ProximityRecognition (these have test_cross_user/env/device splits;
+  FallDetection/BreathingDetection only have easy/hard/medium within same users
+  U06/U23 — NOT real OOD).
+  6. Create scripts/slurm_supervised_sweep.sh: Array 0-1 →
+  [HumanActivityRecognition, ProximityRecognition]. Train TransformerClassifier
+  via train_supervised.py with paper config: emb_dim=256 depth=4 num_heads=8 
+  dropout=0.1 lr=0.001 batch_size=128 epochs=100. Log to
+  WANDB_PROJECT=ood-detection WANDB_ENTITY=cs8803hsi.
+  7. scripts/submit_sweep.sh: Change default array 0-3 → 0-8. Add independent
+  supervised job (no pretrain dependency).
+
+  Key constraint: pretrain.py line 174 already excludes
+  HAR/ProximityRecognition/HumanIdentification from --all_tasks pretraining — no
+   leakage. Use pixi run -e cuda128 for all python commands.
+
+✻ Worked for 30s

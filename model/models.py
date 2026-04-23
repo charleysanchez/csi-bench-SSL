@@ -1014,12 +1014,20 @@ class CPCModel(nn.Module):
     """
     Contrastive Predictive Coding (CPC) Model.
     Uses a feature encoder (g_enc) and an autoregressive model (g_ar) (GRU).
+
+    cpc_k_values: if provided (list of ints), overrides cpc_k_steps with max(cpc_k_values).
+                  Used by random_k and multi_k training modes so W_k covers all needed steps.
     """
-    def __init__(self, feature_size=232, hidden_size=256, cpc_k_steps=4, win_len=None):
+    def __init__(self, feature_size=232, hidden_size=256, cpc_k_steps=4, win_len=None,
+                 cpc_k_values=None):
         super().__init__()
         self.feature_size = feature_size
         self.hidden_size = hidden_size
-        self.cpc_k_steps = cpc_k_steps
+        # adaptive modes: build W_k up to max(k_values) so all prediction heads exist
+        if cpc_k_values:
+            self.cpc_k_steps = max(cpc_k_values)
+        else:
+            self.cpc_k_steps = cpc_k_steps
 
         # g_enc: Feature Encoder (x_t -> z_t)
         # BUG FIX: Replaced non-causal padding Conv1d with CausalConv1d.

@@ -70,6 +70,13 @@ class CPCTrainer(BaseTrainer):
         self.local_rank = local_rank
         self.k_steps = getattr(config, "cpc_k_steps", k_steps)
 
+        # Adaptive k-steps mode: fixed (default) | random_k | multi_k
+        self.k_mode = getattr(config, "cpc_k_mode", "fixed") if config else "fixed"
+        raw_k_values = getattr(config, "cpc_k_values", None) if config else None
+        self.k_values = list(raw_k_values) if raw_k_values else None
+        if self.k_mode in ("random_k", "multi_k") and self.k_values:
+            print(f"CPC k_mode={self.k_mode}, k_values={self.k_values}")
+
         # Domain-aware CPC: use domain labels to create harder negatives
         self.domain_aware = getattr(config, "domain_aware", False) if config else False
         # Max fraction of negatives to sample from same domain — linearly ramped from 0.0
@@ -372,9 +379,22 @@ class CPCTrainer(BaseTrainer):
 
         num_negatives = getattr(self.config, "cpc_num_negatives", 256)
 
-        for k in range(1, k_steps + 1):
+        # Adaptive k-steps logic
+        if getattr(self, "k_mode", "fixed") == "random_k" and self.k_values:
+            import random
+            k_list = [random.choice(self.k_values)]
+        elif getattr(self, "k_mode", "fixed") == "multi_k" and self.k_values:
+            k_list = self.k_values
+        else:
+            k_list = list(range(1, k_steps + 1))
+            
+        valid_k_count = 0
+
+        for k in k_list:
             if T - k <= 0:
                 continue
+            
+            valid_k_count += 1
 
             z_t_k = z[:, k:, :]          # [B, T-k, feat_dim]
             c_t_pred = preds[k - 1][:, :-k, :]  # [B, T-k, feat_dim]
@@ -436,4 +456,4 @@ class CPCTrainer(BaseTrainer):
             step_loss = F.cross_entropy(logits, step_labels)
             loss += step_loss
 
-        return loss / max(1, k_steps)
+        return loss / max(1, valid_k_count)

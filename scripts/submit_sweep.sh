@@ -12,7 +12,7 @@
 
 set -eo pipefail
 
-ARRAY="${1:-0-3}"
+ARRAY="${1:-0-8}"
 
 echo "Submitting pretrain sweep (array $ARRAY)..."
 PRETRAIN_JID=$(sbatch --parsable --array="$ARRAY" scripts/slurm_pretrain_sweep.sh)
@@ -24,7 +24,12 @@ PROBE_JID=$(sbatch --parsable --array="$ARRAY" \
     scripts/slurm_linear_probe_sweep.sh)
 echo "  Probe job ID:    $PROBE_JID"
 
+echo "Submitting supervised baseline sweep (array 0-1)..."
+SUPERVISED_JID=$(sbatch --parsable --array="0-1" scripts/slurm_supervised_sweep.sh)
+echo "  Supervised job ID: $SUPERVISED_JID"
+
 echo ""
-echo "Monitor: squeue -j $PRETRAIN_JID,$PROBE_JID"
+echo "Monitor: squeue -j $PRETRAIN_JID,$PROBE_JID,$SUPERVISED_JID"
 echo "Logs:    logs/pretrain_${PRETRAIN_JID}_*.out"
 echo "         logs/probe_${PROBE_JID}_*.out"
+echo "         logs/supervised_${SUPERVISED_JID}_*.out"

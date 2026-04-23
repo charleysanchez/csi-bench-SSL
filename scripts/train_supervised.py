@@ -155,6 +155,14 @@ def main(args=None):
                     help='DANN loss weight for environment domain head')
         parser.add_argument('--lambda_device', type=float, default=0.1,
                     help='DANN loss weight for device domain head')
+        parser.add_argument('--wandb_project', type=str, default=None,
+                    help='W&B project name')
+        parser.add_argument('--wandb_entity', type=str, default=None,
+                    help='W&B entity name')
+        parser.add_argument('--wandb_run_name', type=str, default=None,
+                    help='W&B run name')
+        parser.add_argument('--use_adapter', action='store_true',
+                    help='Wrap model in MultiTaskAdapterModel to use task-specific adapters for better generalizability.')
 
         args = parser.parse_args()
 
@@ -226,6 +234,17 @@ def main(args=None):
     print(f"Experiment ID: {experiment_id}")
     print(f"Results will be saved to: {results_dir}")
     print(f"Model checkpoints will be saved to: {checkpoint_dir}")
+
+    # Set up W&B
+    if getattr(args, 'wandb_project', None):
+        import wandb
+        wandb.init(
+            project=args.wandb_project,
+            entity=getattr(args, 'wandb_entity', None),
+            name=getattr(args, 'wandb_run_name', experiment_id),
+            config=vars(args)
+        )
+        print(f"W&B initialized for run {wandb.run.name}")
 
     # set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -374,6 +393,31 @@ def main(args=None):
         print(f"  Missing keys (expected — new head): {missing}")
         print(f"  Unexpected keys: {unexpected}")
         print("Pretrained encoder loaded successfully.")
+
+    # Wrap model with Task-Specific Adapters and Heads if requested
+    if getattr(args, 'use_adapter', False):
+        try:
+            from model.multitask.models import MultiTaskAdapterModel
+            print(f"Wrapping {args.model} in MultiTaskAdapterModel for task {args.task}")
+            # Ensure model acts as a backbone (returning features)
+            if hasattr(model, 'classifier'):
+                model.classifier = nn.Identity()
+            if hasattr(model, 'fc'):
+                model.fc = nn.Identity()
+            if hasattr(model, 'head'):
+                model.head = nn.Identity()
+            
+            # Ensure config exists for adapter loop
+            class ConfigDict(dict):
+                def __getattr__(self, name): return self.get(name)
+            model.config = ConfigDict(
+                hidden_size=getattr(model, 'd_model', getattr(model, 'emb_dim', args.emb_dim)),
+                num_hidden_layers=getattr(args, 'depth', 4)
+            )
+            model = MultiTaskAdapterModel(model, {args.task: num_classes})
+            model.set_active_task(args.task)
+        except ImportError:
+            print("Warning: Could not import MultiTaskAdapterModel. Skipping adapter wrapping.")
 
     if getattr(args, 'use_dann', False):
         print("Wrapping model in DANNTransformer...")
@@ -628,6 +672,27 @@ def main(args=None):
     print("\nTraining and evaluation completed.")
     print(f"Best model from epoch {best_epoch}, saved to {checkpoint_dir}")
     print(f"Results saved to {results_dir}")
+
+    # Log metrics and graphs to W&B
+    if getattr(args, 'wandb_project', None):
+        import wandb
+        for split_name, metrics in all_results.items():
+            wandb.log({
+                f"supervised/{args.task}/{split_name}/acc_mean": metrics['accuracy'],
+                f"supervised/{args.task}/{split_name}/f1_mean": metrics['f1_score']
+            })
+            wandb.run.summary[f"supervised/{args.task}/{split_name}/acc_mean"] = metrics['accuracy']
+            wandb.run.summary[f"supervised/{args.task}/{split_name}/f1_mean"] = metrics['f1_score']
+            
+            # Try to upload the generated confusion matrix plot if it exists
+            confusion_path = os.path.join(results_dir, f"{args.model}_{args.task}_{split_name}_confusion.png")
+            if os.path.exists(confusion_path):
+                wandb.log({f"confusion_matrix/{split_name}": wandb.Image(confusion_path)})
+                
+        # Also upload the training history graph if it exists
+        train_curve_path = os.path.join(checkpoint_dir, "training_history.png")
+        if os.path.exists(train_curve_path):
+            wandb.log({"training/history_curve": wandb.Image(train_curve_path)})
 
     # Check if this is the best model for the task so far
     # Update best_performance.json if performance improved

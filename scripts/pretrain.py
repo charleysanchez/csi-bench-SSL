@@ -58,6 +58,8 @@ def main():
     parser.add_argument("--warmup_epochs", type=int, default=5)
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--cpc_k_steps", type=int, default=4, help="Number of steps for CPC future prediction")
+    parser.add_argument("--cpc_k_mode", type=str, default="fixed", choices=["fixed", "random_k", "multi_k"], help="Mode for k steps generation limit/variation.")
+    parser.add_argument("--cpc_k_values", type=int, nargs="+", default=None, help="Values of k to pick from when mode is random_k or multi_k.")
     parser.add_argument("--domain_aware", action="store_true",
                         help="Enable domain-aware hard negative mining in CPC pretraining.")
     parser.add_argument("--domain_neg_ratio", type=float, default=0.5,
@@ -308,6 +310,7 @@ def main():
             'feature_size': args.feature_size,
             'hidden_size': cpc_hidden,
             'cpc_k_steps': getattr(args, 'cpc_k_steps', 4),
+            'cpc_k_values': getattr(args, 'cpc_k_values', None),
         })
 
     print(f"Creating {args.model} model with kwargs: {model_kwargs}")
