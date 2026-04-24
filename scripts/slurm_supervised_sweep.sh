@@ -56,7 +56,7 @@ pixi run -e cuda128 python -u scripts/train_supervised.py \
     --depth 4 \
     --num_heads 8 \
     --dropout 0.1 \
-    --learning_rate 0.001 \
+    --lr 0.001 \
     --batch_size 128 \
     --epochs 100 \
     --use_adapter \
