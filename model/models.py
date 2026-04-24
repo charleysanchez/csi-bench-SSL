@@ -1053,8 +1053,8 @@ class CPCModel(nn.Module):
 
         # W_k: Linear projections for predicting future steps k
         self.W_k = nn.ModuleList([
-            nn.Linear(hidden_size, hidden_size, bias=False) 
-            for _ in range(cpc_k_steps)
+            nn.Linear(hidden_size, hidden_size, bias=False)
+            for _ in range(self.cpc_k_steps)
         ])
 
     def forward(self, x):
