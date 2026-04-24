@@ -1,0 +1,217 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            8h0hjl96wqmii2ja7vm6v9ci7txatb57:
+                args:
+                    - --pretrain_method
+                    - cpc
+                    - --all_tasks
+                    - --data_dir
+                    - data
+                    - --epochs
+                    - "150"
+                    - --batch_size
+                    - "600"
+                    - --num_workers
+                    - "5"
+                    - --learning_rate
+                    - "5e-4"
+                    - --warmup_epochs
+                    - "10"
+                    - --pin_memory
+                    - --persistent_workers
+                    - --prefetch_factor
+                    - "4"
+                    - --amp
+                    - --save_dir
+                    - pretrain_results/sweep
+                    - --wandb_entity
+                    - cs8803hsi
+                    - --wandb_project
+                    - ood-detection
+                    - --wandb_run_name
+                    - k_steps_12_job5059109_pretrain
+                    - --seed
+                    - "42"
+                    - --max_train_hours
+                    - "6.0"
+                    - --run_name
+                    - k_steps_12
+                    - --cpc_k_steps
+                    - "12"
+                    - --cpc_num_negatives
+                    - "512"
+                    - --emb_dim
+                    - "512"
+                    - --domain_aware
+                    - --domain_neg_ratio
+                    - "0.8"
+                codePath: scripts/pretrain.py
+                codePathLocal: scripts/pretrain.py
+                cpu_count: 64
+                cpu_count_logical: 64
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "53619982336"
+                        used: "24335912960"
+                email: ckirby38@gatech.edu
+                executable: /home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/bin/python
+                git:
+                    commit: f95a9a09c81076922b14029de9bcbea2093bf439
+                    remote: https://github.com/charleysanchez/csi-bench-SSL.git
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-096c84e8-a1b4-11d6-feb2-d1fca92b17e4
+                host: atl1-1-03-013-8-0.pace.gatech.edu
+                memory:
+                    total: "2163634159616"
+                os: Linux-5.14.0-570.62.1.el9_6.x86_64-x86_64-with-glibc2.34
+                program: /home/hice1/ckirby38/gatech/csi-bench-SSL/scripts/pretrain.py
+                python: CPython 3.12.13
+                root: pretrain_results/sweep/all_tasks/cpc/k_steps_12
+                slurm:
+                    array_job_id: "5050757"
+                    array_task_count: "9"
+                    array_task_id: "6"
+                    array_task_max: "8"
+                    array_task_min: "0"
+                    array_task_step: "1"
+                    cluster_name: ice-slurm
+                    conf: /var/lib/slurm/slurmd/conf-cache/slurm.conf
+                    cpus_on_node: "5"
+                    cpus_per_task: "5"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: coc
+                    job_cpus_per_node: "5"
+                    job_end_time: "1777048907"
+                    job_gid: "2626"
+                    job_gpus: "2"
+                    job_id: "5059109"
+                    job_name: cpc-pretrain
+                    job_nodelist: atl1-1-03-013-8-0
+                    job_num_nodes: "1"
+                    job_partition: ice-gpu
+                    job_qos: coc-ice
+                    job_start_time: "1777025506"
+                    job_uid: "3490974"
+                    job_user: ckirby38
+                    jobid: "5059109"
+                    localid: "0"
+                    mem_per_node: "49152"
+                    mpi_type: pmix_v4
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: atl1-1-03-013-8-0
+                    nprocs: "1"
+                    ntasks: "1"
+                    oom_kill_step: "0"
+                    pmix_tmpdir: /tmp
+                    prio_process: "0"
+                    procid: "0"
+                    root: /opt/slurm/current
+                    script_context: prolog_task
+                    submit_dir: /home/hice1/ckirby38/gatech/csi-bench-SSL
+                    submit_host: login-ice-1.pace.gatech.edu
+                    task_pid: "1917536"
+                    tasks_per_node: "1"
+                    topology_addr: atl1-1-03-013-8-0
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=5
+                startedAt: "2026-04-24T10:12:01.849133Z"
+                writerId: 8h0hjl96wqmii2ja7vm6v9ci7txatb57
+        m: []
+        python_version: 3.12.13
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 13
+                - 16
+            "4": 3.12.13
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": linux-x86_64
+all_tasks:
+    value: true
+amp:
+    value: true
+batch_size:
+    value: 600
+config:
+    value: null
+cpc_k_mode:
+    value: fixed
+cpc_k_steps:
+    value: 12
+cpc_k_values:
+    value: null
+cpc_num_negatives:
+    value: 512
+data_dir:
+    value: data
+depth:
+    value: 4
+domain_aware:
+    value: true
+domain_neg_ratio:
+    value: 0.8
+dropout:
+    value: 0.1
+emb_dim:
+    value: 512
+epochs:
+    value: 150
+feature_size:
+    value: 232
+learning_rate:
+    value: 0.0005
+max_train_hours:
+    value: 6
+model:
+    value: cpc
+num_heads:
+    value: 8
+num_workers:
+    value: 5
+patience:
+    value: 20
+persistent_workers:
+    value: true
+pin_memory:
+    value: true
+prefetch_factor:
+    value: 4
+pretrain_method:
+    value: cpc
+run_name:
+    value: k_steps_12
+save_dir:
+    value: pretrain_results/sweep
+seed:
+    value: 42
+task:
+    value: null
+wandb_entity:
+    value: cs8803hsi
+wandb_project:
+    value: ood-detection
+wandb_run_name:
+    value: k_steps_12_job5059109_pretrain
+warmup_epochs:
+    value: 10
+weight_decay:
+    value: 1e-05
+win_len:
+    value: 500

@@ -1,0 +1,131 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-23-2026 06:49:21
+Job ID:    5045388
+User ID:   ckirby38
+Account:   coc
+Job name:  cpc-probe
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    5045388  (array task 2)
+Run:    k_steps_4
+Node:   atl1-1-03-012-28-0
+==============================
+
+=== GPU ===
+NVIDIA H100 80GB HBM3, 81559 MiB, 580.105.08
+===========
+
+>>> Encoder: pretrain_results/sweep/all_tasks/cpc/k_steps_4/encoder_weights.pt
+
+>>> Running linear probe for k_steps_4
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ckirby38 (cs8803hsi) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 1uitfpwu
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/hice1/ckirby38/gatech/csi-bench-SSL/wandb/wandb/run-20260423_064936-1uitfpwu
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run k_steps_4_job5045388_probe
+wandb: ⭐️ View project at https://wandb.ai/cs8803hsi/ood-detection
+wandb: 🚀 View run at https://wandb.ai/cs8803hsi/ood-detection/runs/1uitfpwu
+Device: cuda
+  Auto-detected hidden_size=512 from encoder weights (overrides --hidden_size=256)
+Encoder loaded from pretrain_results/sweep/all_tasks/cpc/k_steps_4/encoder_weights.pt
+
+============================================================
+Task: FallDetection
+============================================================
+Using provided task directory: data/FallDetection
+Using split: train_id
+[CSIDataset] dropped 71 missing samples
+Loaded 4619 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (4619, 512), classes: [0, 1]
+Using provided task directory: data/FallDetection
+Using split: test_id
+[CSIDataset] dropped 20 missing samples
+Loaded 985 samples for BreathingDetection - test_id
+  Extracting test_id features...
+  k=   1  test_id               acc=0.494±0.041  f1=0.467±0.060
+  k=   2  test_id               acc=0.500±0.036  f1=0.488±0.043
+  k=   4  test_id               acc=0.565±0.045  f1=0.555±0.054
+  k=   8  test_id               acc=0.558±0.043  f1=0.556±0.042
+  k=  16  test_id               acc=0.601±0.025  f1=0.598±0.026
+  k=  32  test_id               acc=0.649±0.006  f1=0.647±0.007
+  k=  64  test_id               acc=0.702±0.025  f1=0.696±0.028
+  k=full  test_id               acc=0.873±0.000  f1=0.869±0.000
+
+============================================================
+Task: BreathingDetection
+============================================================
+Using provided task directory: data/BreathingDetection
+Using split: train_id
+[CSIDataset] dropped 1 missing samples
+Loaded 69995 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (69995, 512), classes: [0, 1]
+Using provided task directory: data/BreathingDetection
+Using split: test_id
+Loaded 15007 samples for BreathingDetection - test_id
+  Extracting test_id features...
+  k=   1  test_id               acc=0.560±0.181  f1=0.550±0.180
+  k=   2  test_id               acc=0.591±0.056  f1=0.565±0.072
+  k=   4  test_id               acc=0.596±0.075  f1=0.588±0.076
+  k=   8  test_id               acc=0.660±0.011  f1=0.652±0.012
+  k=  16  test_id               acc=0.656±0.018  f1=0.651±0.016
+  k=  32  test_id               acc=0.661±0.020  f1=0.657±0.018
+  k=  64  test_id               acc=0.681±0.016  f1=0.676±0.014
+  k=full  test_id               acc=0.768±0.000  f1=0.762±0.000
+
+Results saved → results/linear_probe/k_steps_4/few_shot_results.csv
+  Plot: results/linear_probe/k_steps_4/few_shot_FallDetection.png
+  Plot: results/linear_probe/k_steps_4/few_shot_BreathingDetection.png
+Plots saved → results/linear_probe/k_steps_4/
+wandb: uploading artifact run-1uitfpwu-proberesults_table-tRMEuw; updating run metadata
+wandb: uploading artifact run-1uitfpwu-proberesults_table-tRMEuw
+wandb: uploading config.yaml; uploading media/table/probe/results_table_16_bc58e60f8fc111c3bc3c.table.json; uploading wandb-summary.json
+wandb: 
+wandb: Run history:
+wandb: probe/BreathingDetection/test_id/acc_mean ▁▂▂▄▄▄▅█
+wandb:  probe/BreathingDetection/test_id/acc_std █▃▄▁▂▂▂▁
+wandb:  probe/BreathingDetection/test_id/f1_mean ▁▁▂▄▄▅▅█
+wandb:   probe/BreathingDetection/test_id/f1_std █▄▄▁▂▂▂▁
+wandb:      probe/FallDetection/test_id/acc_mean ▁▁▂▂▃▄▅█
+wandb:       probe/FallDetection/test_id/acc_std ▇▇██▅▂▅▁
+wandb:       probe/FallDetection/test_id/f1_mean ▁▁▃▃▃▄▅█
+wandb:        probe/FallDetection/test_id/f1_std █▆▇▆▄▂▄▁
+wandb:                          probe/k_shot_int ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁██
+wandb: 
+wandb: Run summary:
+wandb: probe/BreathingDetection/test_id/acc_full 0.76771
+wandb: probe/BreathingDetection/test_id/acc_mean 0.76771
+wandb:  probe/BreathingDetection/test_id/acc_std 0
+wandb:  probe/BreathingDetection/test_id/f1_full 0.76188
+wandb:  probe/BreathingDetection/test_id/f1_mean 0.76188
+wandb:   probe/BreathingDetection/test_id/f1_std 0.0
+wandb:      probe/FallDetection/test_id/acc_full 0.8731
+wandb:      probe/FallDetection/test_id/acc_mean 0.8731
+wandb:       probe/FallDetection/test_id/acc_std 0
+wandb:       probe/FallDetection/test_id/f1_full 0.86939
+wandb:                                        +3 ...
+wandb: 
+wandb: 🚀 View run k_steps_4_job5045388_probe at: https://wandb.ai/cs8803hsi/ood-detection/runs/1uitfpwu
+wandb: ⭐️ View project at: https://wandb.ai/cs8803hsi/ood-detection
+wandb: Synced 5 W&B file(s), 1 media file(s), 2 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/wandb/run-20260423_064936-1uitfpwu/logs
+
+>>> Done. Results: results/linear_probe/k_steps_4
+---------------------------------------
+Begin Slurm Epilog: Apr-23-2026 06:58:04
+Job ID:        5045388
+Array Job ID:  5045385_2
+User ID:       ckirby38
+Account:       coc
+Job name:      cpc-probe
+Resources:     cpu=5,gres/gpu:h100=1,mem=32G,node=1
+Rsrc Used:     cput=00:43:35,vmem=0,walltime=00:08:43,mem=16873796K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-28-0
+---------------------------------------

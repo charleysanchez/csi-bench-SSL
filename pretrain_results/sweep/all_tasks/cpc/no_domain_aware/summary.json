@@ -1,0 +1,7 @@
+{
+    "best_epoch": 130,
+    "best_val_loss": 0.047429909706026,
+    "experiment_id": "no_domain_aware",
+    "task": "all_tasks",
+    "timestamp": "2026-04-24 10:22:28"
+}

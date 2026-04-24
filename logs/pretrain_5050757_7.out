@@ -1,0 +1,129 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-24-2026 06:16:26
+Job ID:    5059159
+User ID:   ckirby38
+Account:   coc
+Job name:  cpc-pretrain
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    5059159  (array task 7)
+Run:    random_k
+Extra:  --cpc_k_mode random_k --cpc_k_values 4 8 12 --cpc_num_negatives 512 --emb_dim 512 --domain_aware --domain_neg_ratio 0.8
+Node:   atl1-1-03-012-18-0
+==============================
+
+=== GPU ===
+NVIDIA H100 80GB HBM3, 81559 MiB, 580.105.08
+===========
+
+>>> CPC pretraining (random_k)
+Experiment ID: random_k
+Results: pretrain_results/sweep/all_tasks/cpc/random_k
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ckirby38 (cs8803hsi) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run l2rcb5va
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in pretrain_results/sweep/all_tasks/cpc/random_k/wandb/run-20260424_061641-l2rcb5va
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run random_k_job5059159_pretrain
+wandb: ⭐️ View project at https://wandb.ai/cs8803hsi/ood-detection
+wandb: 🚀 View run at https://wandb.ai/cs8803hsi/ood-detection/runs/l2rcb5va
+W&B run: https://wandb.ai/cs8803hsi/ood-detection/runs/l2rcb5va
+Using device: cuda
+
+Loading datasets for all tasks...
+Found tasks: ['BreathingDetection', 'FallDetection', 'Localization', 'MotionSourceRecognition']
+Using provided task directory: data/BreathingDetection
+Using split: train_id
+[CSIDataset] dropped 1 missing samples
+Loaded 69995 samples for BreathingDetection - train_id
+  BreathingDetection train: 69995 samples
+Using provided task directory: data/BreathingDetection
+Using split: val_id
+Loaded 14997 samples for BreathingDetection - val_id
+  BreathingDetection val:   14997 samples
+Using provided task directory: data/FallDetection
+Using split: train_id
+[CSIDataset] dropped 71 missing samples
+Loaded 4619 samples for FallDetection - train_id
+  FallDetection train: 4619 samples
+Using provided task directory: data/FallDetection
+Using split: val_id
+[CSIDataset] dropped 11 missing samples
+Loaded 994 samples for FallDetection - val_id
+  FallDetection val:   994 samples
+Using provided task directory: data/Localization
+Using split: train_id
+Loaded 2364 samples for Localization - train_id
+  Localization train: 2364 samples
+Using provided task directory: data/Localization
+Using split: val_id
+Loaded 533 samples for Localization - val_id
+  Localization val:   533 samples
+Using provided task directory: data/MotionSourceRecognition
+Using split: train_id
+Loaded 42599 samples for MotionSourceRecognition - train_id
+  MotionSourceRecognition train: 42599 samples
+Using provided task directory: data/MotionSourceRecognition
+Using split: val_id
+Loaded 9128 samples for MotionSourceRecognition - val_id
+  MotionSourceRecognition val:   9128 samples
+
+Total train samples: 119577
+Total val samples:   25652
+Creating cpc model with kwargs: {'win_len': 500, 'feature_size': 232, 'hidden_size': 512, 'cpc_k_steps': 4, 'cpc_k_values': [4, 8, 12]}
+Model parameters: 3,770,368
+Using step-level warmup cosine LR scheduler: 2000 warmup steps, 30000 total steps
+CPC k_mode=random_k, k_values=[4, 8, 12]
+Domain-aware CPC enabled (domain_neg_ratio ramps 0.0 -> 0.8)
+AMP enabled: torch.bfloat16
+
+Starting cpc pretraining...
+
+
+Epoch 1/150
+domain_neg_ratio: 0.000
+  0%|          | 0/200 [00:00<?, ?it/s]                                       Traceback (most recent call last):
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/scripts/pretrain.py", line 416, in <module>
+    main()
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/scripts/pretrain.py", line 382, in main
+    model, training_results = trainer.train()
+                              ^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/engine/cpc_trainer.py", line 170, in train
+    train_loss, train_time = self.train_epoch()
+                             ^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/engine/cpc_trainer.py", line 253, in train_epoch
+    outputs = self.model(inputs)
+              ^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/model/models.py", line 1077, in forward
+    preds.append(self.W_k[k](c))
+                 ~~~~~~~~^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/lib/python3.12/site-packages/torch/nn/modules/container.py", line 386, in __getitem__
+    return self._modules[self._get_abs_string_index(idx)]
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/lib/python3.12/site-packages/torch/nn/modules/container.py", line 370, in _get_abs_string_index
+    raise IndexError(f"index {idx} is out of range")
+IndexError: index 4 is out of range
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mrandom_k_job5059159_pretrain[0m at: [34mhttps://wandb.ai/cs8803hsi/ood-detection/runs/l2rcb5va[0m
+---------------------------------------
+Begin Slurm Epilog: Apr-24-2026 06:17:28
+Job ID:        5059159
+Array Job ID:  5050757_7
+User ID:       ckirby38
+Account:       coc
+Job name:      cpc-pretrain
+Resources:     cpu=5,gres/gpu:h100=1,mem=48G,node=1
+Rsrc Used:     cput=00:05:15,vmem=0,walltime=00:01:03,mem=13724464K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-18-0
+---------------------------------------

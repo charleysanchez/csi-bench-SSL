@@ -1,0 +1,67 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-24-2026 06:17:59
+Job ID:    5050759
+User ID:   ckirby38
+Account:   coc
+Job name:  sup-base
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    5050759  (array task 1)
+Task:   ProximityRecognition
+Node:   atl1-1-03-012-18-0
+==============================
+
+>>> Running Supervised Baseline for ProximityRecognition
+usage: train_supervised.py [-h] [--data_dir DATA_DIR] [--task TASK]
+                           [--model {mlp,lstm,resnet18,transformer,vit,patchtst,timesformer1d,cpc}]
+                           [--batch_size BATCH_SIZE] [--epochs EPOCHS]
+                           [--lr LR] [--data_key DATA_KEY]
+                           [--save_dir SAVE_DIR] [--output_dir OUTPUT_DIR]
+                           [--weight_decay WEIGHT_DECAY]
+                           [--warmup_epochs WARMUP_EPOCHS]
+                           [--patience PATIENCE] [--win_len WIN_LEN]
+                           [--feature_size FEATURE_SIZE]
+                           [--in_channels IN_CHANNELS] [--emb_dim EMB_DIM]
+                           [--dropout DROPOUT]
+                           [--label_smoothing LABEL_SMOOTHING]
+                           [--patch_len PATCH_LEN] [--stride STRIDE]
+                           [--pool {cls,mean}] [--head_dropout HEAD_DROPOUT]
+                           [--patch_size PATCH_SIZE]
+                           [--attn_dropout ATTN_DROPOUT]
+                           [--mlp_ratio MLP_RATIO] [--depth DEPTH]
+                           [--num_heads NUM_HEADS] [--test_splits TEST_SPLITS]
+                           [--enable_few_shot] [--k_shot K_SHOT]
+                           [--inner_lr INNER_LR]
+                           [--num_inner_steps NUM_INNER_STEPS]
+                           [--num_workers NUM_WORKERS] [--use_root_data_path]
+                           [--file_format FILE_FORMAT] [--seed SEED] [--debug]
+                           [--pin_memory] [--no_pin_memory]
+                           [--pretrained_encoder PRETRAINED_ENCODER]
+                           [--config CONFIG] [--experiment_id EXPERIMENT_ID]
+                           [--use_dann] [--freeze_backbone]
+                           [--freeze_layers FREEZE_LAYERS [FREEZE_LAYERS ...]]
+                           [--use_sam] [--sam_rho SAM_RHO] [--manifold_mixup]
+                           [--cross_domain_mixup]
+                           [--coral_weight CORAL_WEIGHT]
+                           [--lambda_user LAMBDA_USER]
+                           [--lambda_env LAMBDA_ENV]
+                           [--lambda_device LAMBDA_DEVICE]
+                           [--wandb_project WANDB_PROJECT]
+                           [--wandb_entity WANDB_ENTITY]
+                           [--wandb_run_name WANDB_RUN_NAME] [--use_adapter]
+train_supervised.py: error: unrecognized arguments: --learning_rate 0.001
+---------------------------------------
+Begin Slurm Epilog: Apr-24-2026 06:18:15
+Job ID:        5050759
+Array Job ID:  5050759_1
+User ID:       ckirby38
+Account:       coc
+Job name:      sup-base
+Resources:     cpu=5,gres/gpu:h100=1,mem=32G,node=1
+Rsrc Used:     cput=00:01:25,vmem=0,walltime=00:00:17,mem=568768K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-18-0
+---------------------------------------

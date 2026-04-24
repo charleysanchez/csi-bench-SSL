@@ -1,0 +1,203 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-24-2026 10:41:14
+Job ID:    5050760
+User ID:   ckirby38
+Account:   coc
+Job name:  cpc-probe
+Partition: ice-bw-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    5050760  (array task 0)
+Run:    overnight_v1
+Node:   atl1-1-02-003-31-0
+==============================
+
+=== GPU ===
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 97887 MiB, 580.105.08
+===========
+
+>>> Encoder: pretrain_results/sweep/all_tasks/cpc/overnight_v1/encoder_weights.pt
+
+>>> Running linear probe for overnight_v1
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ckirby38 (cs8803hsi) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run gnk2c7oh
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/hice1/ckirby38/gatech/csi-bench-SSL/wandb/wandb/run-20260424_104128-gnk2c7oh
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run overnight_v1_job5050760_probe
+wandb: ⭐️ View project at https://wandb.ai/cs8803hsi/ood-detection
+wandb: 🚀 View run at https://wandb.ai/cs8803hsi/ood-detection/runs/gnk2c7oh
+Device: cuda
+  Auto-detected hidden_size=512 from encoder weights (overrides --hidden_size=256)
+  Auto-detected cpc_k_steps=8 from encoder weights
+Encoder loaded from pretrain_results/sweep/all_tasks/cpc/overnight_v1/encoder_weights.pt
+
+============================================================
+Task: HumanActivityRecognition
+============================================================
+Using provided task directory: data/HumanActivityRecognition
+Using split: train_id
+Loaded 15843 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (15843, 512), classes: [0, 1, 2, 3, 4]
+Using provided task directory: data/HumanActivityRecognition
+Using split: test_id
+Loaded 3400 samples for BreathingDetection - test_id
+  Extracting test_id features...
+Using provided task directory: data/HumanActivityRecognition
+Using split: test_cross_env
+Loaded 5660 samples for BreathingDetection - test_cross_env
+  Extracting test_cross_env features...
+Using provided task directory: data/HumanActivityRecognition
+Using split: test_cross_user
+Loaded 5967 samples for BreathingDetection - test_cross_user
+  Extracting test_cross_user features...
+Using provided task directory: data/HumanActivityRecognition
+Using split: test_cross_device
+Loaded 4958 samples for BreathingDetection - test_cross_device
+  Extracting test_cross_device features...
+  k=   1  test_id               acc=0.172±0.004  f1=0.163±0.007
+  k=   1  test_cross_env        acc=0.178±0.048  f1=0.168±0.024
+  k=   1  test_cross_user       acc=0.198±0.020  f1=0.199±0.008
+  k=   1  test_cross_device     acc=0.153±0.028  f1=0.111±0.012
+  k=   2  test_id               acc=0.179±0.020  f1=0.174±0.015
+  k=   2  test_cross_env        acc=0.174±0.048  f1=0.171±0.046
+  k=   2  test_cross_user       acc=0.180±0.008  f1=0.179±0.008
+  k=   2  test_cross_device     acc=0.179±0.009  f1=0.136±0.012
+  k=   4  test_id               acc=0.199±0.010  f1=0.191±0.005
+  k=   4  test_cross_env        acc=0.186±0.024  f1=0.174±0.013
+  k=   4  test_cross_user       acc=0.222±0.067  f1=0.202±0.038
+  k=   4  test_cross_device     acc=0.226±0.023  f1=0.161±0.020
+  k=   8  test_id               acc=0.270±0.017  f1=0.237±0.004
+  k=   8  test_cross_env        acc=0.238±0.059  f1=0.197±0.028
+  k=   8  test_cross_user       acc=0.268±0.050  f1=0.225±0.026
+  k=   8  test_cross_device     acc=0.203±0.009  f1=0.182±0.011
+  k=  16  test_id               acc=0.305±0.017  f1=0.273±0.003
+  k=  16  test_cross_env        acc=0.253±0.045  f1=0.222±0.035
+  k=  16  test_cross_user       acc=0.246±0.044  f1=0.224±0.017
+  k=  16  test_cross_device     acc=0.239±0.016  f1=0.191±0.026
+  k=  32  test_id               acc=0.303±0.011  f1=0.280±0.010
+  k=  32  test_cross_env        acc=0.242±0.038  f1=0.212±0.029
+  k=  32  test_cross_user       acc=0.243±0.016  f1=0.226±0.019
+  k=  32  test_cross_device     acc=0.228±0.010  f1=0.198±0.012
+  k=  64  test_id               acc=0.354±0.026  f1=0.320±0.019
+  k=  64  test_cross_env        acc=0.284±0.029  f1=0.241±0.023
+  k=  64  test_cross_user       acc=0.265±0.021  f1=0.240±0.026
+  k=  64  test_cross_device     acc=0.247±0.031  f1=0.219±0.009
+  k=full  test_id               acc=0.665±0.000  f1=0.509±0.000
+  k=full  test_cross_env        acc=0.433±0.000  f1=0.227±0.000
+  k=full  test_cross_user       acc=0.504±0.000  f1=0.264±0.000
+  k=full  test_cross_device     acc=0.446±0.000  f1=0.300±0.000
+
+============================================================
+Task: ProximityRecognition
+============================================================
+Using provided task directory: data/ProximityRecognition
+Using split: train_id
+Loaded 8037 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (8037, 512), classes: [0, 1, 2, 3]
+Using provided task directory: data/ProximityRecognition
+Using split: test_id
+Loaded 1728 samples for BreathingDetection - test_id
+  Extracting test_id features...
+Using provided task directory: data/ProximityRecognition
+Using split: test_cross_env
+Loaded 2823 samples for BreathingDetection - test_cross_env
+  Extracting test_cross_env features...
+Using provided task directory: data/ProximityRecognition
+Using split: test_cross_user
+Loaded 3004 samples for BreathingDetection - test_cross_user
+  Extracting test_cross_user features...
+Using provided task directory: data/ProximityRecognition
+Using split: test_cross_device
+Loaded 2453 samples for BreathingDetection - test_cross_device
+  Extracting test_cross_device features...
+  k=   1  test_id               acc=0.241±0.021  f1=0.229±0.028
+  k=   1  test_cross_env        acc=0.266±0.032  f1=0.239±0.039
+  k=   1  test_cross_user       acc=0.247±0.002  f1=0.227±0.017
+  k=   1  test_cross_device     acc=0.258±0.058  f1=0.187±0.048
+  k=   2  test_id               acc=0.266±0.028  f1=0.240±0.029
+  k=   2  test_cross_env        acc=0.244±0.018  f1=0.205±0.016
+  k=   2  test_cross_user       acc=0.257±0.001  f1=0.234±0.008
+  k=   2  test_cross_device     acc=0.272±0.040  f1=0.226±0.050
+  k=   4  test_id               acc=0.298±0.010  f1=0.278±0.015
+  k=   4  test_cross_env        acc=0.248±0.024  f1=0.213±0.033
+  k=   4  test_cross_user       acc=0.255±0.003  f1=0.236±0.014
+  k=   4  test_cross_device     acc=0.317±0.017  f1=0.258±0.030
+  k=   8  test_id               acc=0.313±0.007  f1=0.307±0.009
+  k=   8  test_cross_env        acc=0.296±0.014  f1=0.279±0.011
+  k=   8  test_cross_user       acc=0.265±0.019  f1=0.259±0.018
+  k=   8  test_cross_device     acc=0.260±0.027  f1=0.234±0.022
+  k=  16  test_id               acc=0.338±0.004  f1=0.338±0.003
+  k=  16  test_cross_env        acc=0.282±0.027  f1=0.270±0.022
+  k=  16  test_cross_user       acc=0.270±0.010  f1=0.259±0.016
+  k=  16  test_cross_device     acc=0.284±0.014  f1=0.268±0.016
+  k=  32  test_id               acc=0.357±0.008  f1=0.357±0.009
+  k=  32  test_cross_env        acc=0.271±0.031  f1=0.256±0.028
+  k=  32  test_cross_user       acc=0.257±0.012  f1=0.244±0.018
+  k=  32  test_cross_device     acc=0.288±0.011  f1=0.282±0.010
+  k=  64  test_id               acc=0.398±0.010  f1=0.399±0.011
+  k=  64  test_cross_env        acc=0.279±0.013  f1=0.263±0.021
+  k=  64  test_cross_user       acc=0.277±0.006  f1=0.259±0.014
+  k=  64  test_cross_device     acc=0.298±0.027  f1=0.289±0.033
+  k=full  test_id               acc=0.604±0.000  f1=0.603±0.000
+  k=full  test_cross_env        acc=0.315±0.000  f1=0.280±0.000
+  k=full  test_cross_user       acc=0.311±0.000  f1=0.273±0.000
+  k=full  test_cross_device     acc=0.340±0.000  f1=0.336±0.000
+
+Results saved → results/linear_probe/overnight_v1/few_shot_results.csv
+  Plot: results/linear_probe/overnight_v1/few_shot_HumanActivityRecognition.png
+  Plot: results/linear_probe/overnight_v1/few_shot_ProximityRecognition.png
+Plots saved → results/linear_probe/overnight_v1/
+wandb: uploading artifact run-gnk2c7oh-proberesults_table-RID6UQ; updating run metadata
+wandb: uploading artifact run-gnk2c7oh-proberesults_table-RID6UQ
+wandb: uploading media/table/probe/results_table_64_473f456301ce2e866f7d.table.json; uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb: probe/HumanActivityRecognition/test_cross_device/acc_mean ▁▂▃▂▃▃▃█
+wandb:  probe/HumanActivityRecognition/test_cross_device/acc_std ▇▃▆▃▅▃█▁
+wandb:  probe/HumanActivityRecognition/test_cross_device/f1_mean ▁▂▃▄▄▄▅█
+wandb:   probe/HumanActivityRecognition/test_cross_device/f1_std ▄▄▆▄█▄▄▁
+wandb:    probe/HumanActivityRecognition/test_cross_env/acc_mean ▁▁▁▃▃▃▄█
+wandb:     probe/HumanActivityRecognition/test_cross_env/acc_std ▇▇▄█▆▆▄▁
+wandb:     probe/HumanActivityRecognition/test_cross_env/f1_mean ▁▁▂▄▆▅█▇
+wandb:      probe/HumanActivityRecognition/test_cross_env/f1_std ▅█▃▅▆▅▅▁
+wandb:   probe/HumanActivityRecognition/test_cross_user/acc_mean ▁▁▂▃▂▂▃█
+wandb:    probe/HumanActivityRecognition/test_cross_user/acc_std ▃▂█▆▆▃▃▁
+wandb:                                                       +23 ...
+wandb: 
+wandb: Run summary:
+wandb: probe/HumanActivityRecognition/test_cross_device/acc_full 0.44635
+wandb: probe/HumanActivityRecognition/test_cross_device/acc_mean 0.44635
+wandb:  probe/HumanActivityRecognition/test_cross_device/acc_std 0
+wandb:  probe/HumanActivityRecognition/test_cross_device/f1_full 0.29955
+wandb:  probe/HumanActivityRecognition/test_cross_device/f1_mean 0.29955
+wandb:   probe/HumanActivityRecognition/test_cross_device/f1_std 0
+wandb:    probe/HumanActivityRecognition/test_cross_env/acc_full 0.43251
+wandb:    probe/HumanActivityRecognition/test_cross_env/acc_mean 0.43251
+wandb:     probe/HumanActivityRecognition/test_cross_env/acc_std 0.0
+wandb:     probe/HumanActivityRecognition/test_cross_env/f1_full 0.22704
+wandb:                                                       +39 ...
+wandb: 
+wandb: 🚀 View run overnight_v1_job5050760_probe at: https://wandb.ai/cs8803hsi/ood-detection/runs/gnk2c7oh
+wandb: ⭐️ View project at: https://wandb.ai/cs8803hsi/ood-detection
+wandb: Synced 5 W&B file(s), 1 media file(s), 2 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/wandb/run-20260424_104128-gnk2c7oh/logs
+
+>>> Done. Results: results/linear_probe/overnight_v1
+---------------------------------------
+Begin Slurm Epilog: Apr-24-2026 11:13:41
+Job ID:        5050760
+Array Job ID:  5050758_0
+User ID:       ckirby38
+Account:       coc
+Job name:      cpc-probe
+Resources:     cpu=5,gres/gpu:rtx_pro_6000_blackwell=1,mem=32G,node=1
+Rsrc Used:     cput=02:42:20,vmem=0,walltime=00:32:28,mem=10079072K,energy_used=0
+Partition:     ice-bw-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-02-003-31-0
+---------------------------------------

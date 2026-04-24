@@ -1,0 +1,40 @@
+training:
+  batch_size: 600
+  epochs: 150
+  warmup_epochs: 10
+  patience: 20
+model_params:
+  win_len: 500
+  feature_size: 232
+  emb_dim: 512
+  num_heads: 8
+  depth: 4
+  dropout: 0.1
+optimizer:
+  lr: 0.0005
+  weight_decay: 1.0e-05
+general:
+  pretrain_method: cpc
+  data_dir: data
+  task: null
+  all_tasks: true
+  model: cpc
+  cpc_k_steps: 4
+  cpc_k_mode: fixed
+  cpc_k_values: null
+  domain_aware: true
+  domain_neg_ratio: 0.8
+  cpc_num_negatives: 512
+  save_dir: pretrain_results/sweep
+  run_name: k_steps_4
+  seed: 42
+  num_workers: 5
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  amp: true
+  max_train_hours: 6.0
+  config: null
+  wandb_project: ood-detection
+  wandb_entity: cs8803hsi
+  wandb_run_name: k_steps_4_job5059021_pretrain

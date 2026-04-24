@@ -1,0 +1,194 @@
+_wandb:
+    value:
+        cli_version: 0.25.1
+        e:
+            1oo71j2sp8mh0pkeivk6lgtzlyon3dmu:
+                args:
+                    - --encoder
+                    - pretrain_results/sweep/all_tasks/cpc/k_steps_4/encoder_weights.pt
+                    - --data_dir
+                    - data
+                    - --tasks
+                    - FallDetection
+                    - BreathingDetection
+                    - --k_shots
+                    - "1"
+                    - "2"
+                    - "4"
+                    - "8"
+                    - "16"
+                    - "32"
+                    - "64"
+                    - full
+                    - --seeds
+                    - "42"
+                    - "43"
+                    - "44"
+                    - --batch_size
+                    - "512"
+                    - --num_workers
+                    - "5"
+                    - --save_dir
+                    - results/linear_probe/k_steps_4
+                    - --wandb_entity
+                    - cs8803hsi
+                    - --wandb_project
+                    - ood-detection
+                    - --wandb_run_name
+                    - k_steps_4_job5045388_probe
+                codePath: scripts/linear_probe.py
+                codePathLocal: scripts/linear_probe.py
+                cpu_count: 64
+                cpu_count_logical: 64
+                cudaVersion: "13.0"
+                disk:
+                    /:
+                        total: "53619982336"
+                        used: "24379187200"
+                email: ckirby38@gatech.edu
+                executable: /home/hice1/ckirby38/gatech/csi-bench-SSL/.pixi/envs/cuda128/bin/python
+                git:
+                    commit: 78f8dac936e792bdcd13d76e436ea9e27158a109
+                    remote: https://github.com/charleysanchez/csi-bench-SSL.git
+                gpu: NVIDIA H100 80GB HBM3
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Hopper
+                      cudaCores: 16896
+                      memoryTotal: "85520809984"
+                      name: NVIDIA H100 80GB HBM3
+                      uuid: GPU-8abf353e-265d-2e48-a731-4c4dde78817b
+                host: atl1-1-03-012-28-0.pace.gatech.edu
+                memory:
+                    total: "2163634114560"
+                os: Linux-5.14.0-570.62.1.el9_6.x86_64-x86_64-with-glibc2.34
+                program: /home/hice1/ckirby38/gatech/csi-bench-SSL/scripts/linear_probe.py
+                python: CPython 3.12.13
+                root: /home/hice1/ckirby38/gatech/csi-bench-SSL/wandb
+                slurm:
+                    array_job_id: "5045385"
+                    array_task_count: "4"
+                    array_task_id: "2"
+                    array_task_max: "3"
+                    array_task_min: "0"
+                    array_task_step: "1"
+                    cluster_name: ice-slurm
+                    conf: /var/lib/slurm/slurmd/conf-cache/slurm.conf
+                    cpus_on_node: "5"
+                    cpus_per_task: "5"
+                    gpus_on_node: "1"
+                    gtids: "0"
+                    job_account: coc
+                    job_cpus_per_node: "5"
+                    job_dependency: aftercorr:5045384
+                    job_end_time: "1776948561"
+                    job_gid: "2626"
+                    job_gpus: "4"
+                    job_id: "5045388"
+                    job_name: cpc-probe
+                    job_nodelist: atl1-1-03-012-28-0
+                    job_num_nodes: "1"
+                    job_partition: ice-gpu
+                    job_qos: coc-ice
+                    job_start_time: "1776941361"
+                    job_uid: "3490974"
+                    job_user: ckirby38
+                    jobid: "5045388"
+                    localid: "0"
+                    mem_per_node: "32768"
+                    mpi_type: pmix_v4
+                    nnodes: "1"
+                    nodeid: "0"
+                    nodelist: atl1-1-03-012-28-0
+                    nprocs: "1"
+                    ntasks: "1"
+                    oom_kill_step: "0"
+                    pmix_tmpdir: /tmp
+                    prio_process: "0"
+                    procid: "0"
+                    root: /opt/slurm/current
+                    script_context: prolog_task
+                    submit_dir: /home/hice1/ckirby38/gatech/csi-bench-SSL
+                    submit_host: login-ice-4.pace.gatech.edu
+                    task_pid: "1938407"
+                    tasks_per_node: "1"
+                    topology_addr: atl1-1-03-012-28-0
+                    topology_addr_pattern: node
+                    tres_per_task: cpu=5
+                startedAt: "2026-04-23T10:49:36.303972Z"
+                writerId: 1oo71j2sp8mh0pkeivk6lgtzlyon3dmu
+        m:
+            - "1": probe/k_shot_int
+              "6":
+                - 3
+              "7": []
+            - "2": probe/*
+              "5": 1
+              "6":
+                - 1
+              "7": []
+        python_version: 3.12.13
+        t:
+            "1":
+                - 1
+                - 5
+                - 41
+                - 53
+            "2":
+                - 1
+                - 5
+                - 41
+                - 53
+            "3":
+                - 2
+                - 7
+                - 13
+                - 16
+                - 62
+            "4": 3.12.13
+            "5": 0.25.1
+            "12": 0.25.1
+            "13": linux-x86_64
+batch_size:
+    value: 512
+cpc_k_steps:
+    value: 4
+data_dir:
+    value: data
+encoder:
+    value: pretrain_results/sweep/all_tasks/cpc/k_steps_4/encoder_weights.pt
+feature_size:
+    value: 232
+hidden_size:
+    value: 256
+k_shots:
+    value:
+        - "1"
+        - "2"
+        - "4"
+        - "8"
+        - "16"
+        - "32"
+        - "64"
+        - full
+num_workers:
+    value: 5
+save_dir:
+    value: results/linear_probe/k_steps_4
+seeds:
+    value:
+        - 42
+        - 43
+        - 44
+tasks:
+    value:
+        - FallDetection
+        - BreathingDetection
+wandb_entity:
+    value: cs8803hsi
+wandb_project:
+    value: ood-detection
+wandb_run_name:
+    value: k_steps_4_job5045388_probe
+win_len:
+    value: 500

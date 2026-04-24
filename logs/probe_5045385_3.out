@@ -1,0 +1,131 @@
+---------------------------------------
+Begin Slurm Prolog: Apr-23-2026 07:38:32
+Job ID:    5045385
+User ID:   ckirby38
+Account:   coc
+Job name:  cpc-probe
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+==============================
+Job:    5045385  (array task 3)
+Run:    no_domain_aware
+Node:   atl1-1-03-012-28-0
+==============================
+
+=== GPU ===
+NVIDIA H100 80GB HBM3, 81559 MiB, 580.105.08
+===========
+
+>>> Encoder: pretrain_results/sweep/all_tasks/cpc/no_domain_aware/encoder_weights.pt
+
+>>> Running linear probe for no_domain_aware
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from WANDB_API_KEY.
+wandb: Currently logged in as: ckirby38 (cs8803hsi) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run u0uk6qdf
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/hice1/ckirby38/gatech/csi-bench-SSL/wandb/wandb/run-20260423_073846-u0uk6qdf
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run no_domain_aware_job5045385_probe
+wandb: ⭐️ View project at https://wandb.ai/cs8803hsi/ood-detection
+wandb: 🚀 View run at https://wandb.ai/cs8803hsi/ood-detection/runs/u0uk6qdf
+Device: cuda
+  Auto-detected hidden_size=512 from encoder weights (overrides --hidden_size=256)
+  Auto-detected cpc_k_steps=8 from encoder weights
+Encoder loaded from pretrain_results/sweep/all_tasks/cpc/no_domain_aware/encoder_weights.pt
+
+============================================================
+Task: FallDetection
+============================================================
+Using provided task directory: data/FallDetection
+Using split: train_id
+[CSIDataset] dropped 71 missing samples
+Loaded 4619 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (4619, 512), classes: [0, 1]
+Using provided task directory: data/FallDetection
+Using split: test_id
+[CSIDataset] dropped 20 missing samples
+Loaded 985 samples for BreathingDetection - test_id
+  Extracting test_id features...
+  k=   1  test_id               acc=0.497±0.042  f1=0.457±0.051
+  k=   2  test_id               acc=0.512±0.070  f1=0.478±0.109
+  k=   4  test_id               acc=0.560±0.046  f1=0.554±0.051
+  k=   8  test_id               acc=0.615±0.030  f1=0.615±0.029
+  k=  16  test_id               acc=0.624±0.037  f1=0.622±0.035
+  k=  32  test_id               acc=0.685±0.020  f1=0.683±0.018
+  k=  64  test_id               acc=0.725±0.001  f1=0.718±0.003
+  k=full  test_id               acc=0.907±0.000  f1=0.904±0.000
+
+============================================================
+Task: BreathingDetection
+============================================================
+Using provided task directory: data/BreathingDetection
+Using split: train_id
+[CSIDataset] dropped 1 missing samples
+Loaded 69995 samples for BreathingDetection - train_id
+  Extracting train features...
+  Train: (69995, 512), classes: [0, 1]
+Using provided task directory: data/BreathingDetection
+Using split: test_id
+Loaded 15007 samples for BreathingDetection - test_id
+  Extracting test_id features...
+  k=   1  test_id               acc=0.630±0.070  f1=0.565±0.147
+  k=   2  test_id               acc=0.547±0.128  f1=0.542±0.129
+  k=   4  test_id               acc=0.635±0.043  f1=0.629±0.039
+  k=   8  test_id               acc=0.692±0.011  f1=0.687±0.008
+  k=  16  test_id               acc=0.627±0.042  f1=0.623±0.040
+  k=  32  test_id               acc=0.711±0.011  f1=0.698±0.011
+  k=  64  test_id               acc=0.693±0.020  f1=0.687±0.017
+  k=full  test_id               acc=0.752±0.000  f1=0.742±0.000
+
+Results saved → results/linear_probe/no_domain_aware/few_shot_results.csv
+  Plot: results/linear_probe/no_domain_aware/few_shot_FallDetection.png
+  Plot: results/linear_probe/no_domain_aware/few_shot_BreathingDetection.png
+Plots saved → results/linear_probe/no_domain_aware/
+wandb: uploading artifact run-u0uk6qdf-proberesults_table-fsfcpw; updating run metadata
+wandb: uploading artifact run-u0uk6qdf-proberesults_table-fsfcpw
+wandb: 
+wandb: Run history:
+wandb: probe/BreathingDetection/test_id/acc_mean ▄▁▄▆▄▇▆█
+wandb:  probe/BreathingDetection/test_id/acc_std ▅█▃▂▃▂▂▁
+wandb:  probe/BreathingDetection/test_id/f1_mean ▂▁▄▆▄▆▆█
+wandb:   probe/BreathingDetection/test_id/f1_std █▇▃▁▃▂▂▁
+wandb:      probe/FallDetection/test_id/acc_mean ▁▁▂▃▃▄▅█
+wandb:       probe/FallDetection/test_id/acc_std ▅█▆▄▅▃▁▁
+wandb:       probe/FallDetection/test_id/f1_mean ▁▁▃▃▄▅▅█
+wandb:        probe/FallDetection/test_id/f1_std ▄█▄▃▃▂▁▁
+wandb:                          probe/k_shot_int ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁██
+wandb: 
+wandb: Run summary:
+wandb: probe/BreathingDetection/test_id/acc_full 0.75245
+wandb: probe/BreathingDetection/test_id/acc_mean 0.75245
+wandb:  probe/BreathingDetection/test_id/acc_std 0
+wandb:  probe/BreathingDetection/test_id/f1_full 0.74199
+wandb:  probe/BreathingDetection/test_id/f1_mean 0.74199
+wandb:   probe/BreathingDetection/test_id/f1_std 0
+wandb:      probe/FallDetection/test_id/acc_full 0.9066
+wandb:      probe/FallDetection/test_id/acc_mean 0.9066
+wandb:       probe/FallDetection/test_id/acc_std 0.0
+wandb:       probe/FallDetection/test_id/f1_full 0.9041
+wandb:                                        +3 ...
+wandb: 
+wandb: 🚀 View run no_domain_aware_job5045385_probe at: https://wandb.ai/cs8803hsi/ood-detection/runs/u0uk6qdf
+wandb: ⭐️ View project at: https://wandb.ai/cs8803hsi/ood-detection
+wandb: Synced 5 W&B file(s), 1 media file(s), 2 artifact file(s) and 0 other file(s)
+wandb: Find logs at: ./wandb/wandb/run-20260423_073846-u0uk6qdf/logs
+
+>>> Done. Results: results/linear_probe/no_domain_aware
+---------------------------------------
+Begin Slurm Epilog: Apr-23-2026 07:47:34
+Job ID:        5045385
+Array Job ID:  5045385_3
+User ID:       ckirby38
+Account:       coc
+Job name:      cpc-probe
+Resources:     cpu=5,gres/gpu:h100=1,mem=32G,node=1
+Rsrc Used:     cput=00:44:15,vmem=0,walltime=00:08:51,mem=16947276K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-012-28-0
+---------------------------------------

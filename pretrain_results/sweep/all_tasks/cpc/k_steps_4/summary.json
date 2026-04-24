@@ -1,0 +1,7 @@
+{
+    "best_epoch": 120,
+    "best_val_loss": 0.032365494766162434,
+    "experiment_id": "k_steps_4",
+    "task": "all_tasks",
+    "timestamp": "2026-04-24 09:59:32"
+}
